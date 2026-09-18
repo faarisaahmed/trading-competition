@@ -1,0 +1,143 @@
+# ===========================================================================
+# 2026 MODEL TRADING COMPETITION -- OFFICIAL RULEBOOK (machine-readable)
+#
+# This file is the single source of truth for the rules. The engine reads it;
+# nothing is hard-coded. Any edit after a round starts is recorded in the
+# ledger's `rules_hash` so results stay auditable.
+# ===========================================================================
+
+competition:
+  name: "2026 Model Trading Competition"
+  season: 2026
+  timezone: "America/New_York"
+
+  # Every team starts every round with exactly this much, flat (no carry-over).
+  starting_cash: 5000.0
+  round_length_days: 7          # calendar days; trading happens on open sessions
+
+  # ---- Points awarded by finishing place (1st place = first entry) ----------
+  # 8 scored teams. Gaps are deliberate: winning a round is worth a lot more
+  # than moving up one spot mid-pack, so a team that wins one round and bombs
+  # another can still beat a consistent 4th-placer.
+  points_table: [15, 11, 8, 6, 5, 4, 3, 2]
+  # Teams with identical round returns split the sum of the places they span.
+  tie_policy: average
+  # Final standings tiebreakers, applied in order.
+  tiebreakers: [total_points, total_return, best_round_return, max_drawdown]
+
+  # ---- Risk rails (identical for every team; enforced by the engine) -------
+  risk:
+    allow_short: false           # cash-account semantics: long-only
+    max_gross_leverage: 1.0      # no margin -- gross exposure <= equity
+    max_position_pct: 1.00       # a team MAY go 100% into one name
+    min_order_notional: 1.0      # Alpaca's floor for notional orders
+    max_order_notional: 5000.0   # one order can never exceed the bankroll
+    max_orders_per_tick: 12
+    max_orders_per_day: 2000     # abuse stop, not a strategy constraint
+    # Hard circuit breaker. A team down this much intraday is flattened and
+    # sat out until the next session -- it protects the *competition* from a
+    # single runaway bug, and applies equally to everyone.
+    daily_loss_kill_switch_pct: 0.35
+    # Reject limit orders priced further than this from the mid (fat fingers).
+    max_limit_deviation_pct: 0.10
+    # Quotes older than this are not tradable.
+    max_quote_age_seconds: 120
+    # Flatten-all before the close on the final day of the round so every
+    # team is scored on cash, not on a stale mark.
+    liquidate_at_round_end: true
+    liquidate_minutes_before_close: 10
+
+  # ---- Fairness controls ---------------------------------------------------
+  fairness:
+    # One process fetches market data per tick and hands the identical
+    # snapshot to all teams. Nobody gets a fresher tape.
+    shared_data_snapshot: true
+    # Each strategy gets the same CPU wall-clock budget per tick. Overruns are
+    # logged as a timeout and the tick is skipped for that team only.
+    strategy_timeout_seconds: 5.0
+    # Teams act in a rotating order each tick so no one always trades first.
+    rotate_execution_order: true
+    # Every team's RNG is seeded from (competition_seed, team, round) so runs
+    # are reproducible and no team gets luckier noise than another.
+    competition_seed: 20260101
+    # Simulated slippage/fees in `sim` broker mode, applied identically.
+    sim_slippage_bps: 2.0
+    sim_commission_per_share: 0.0
+
+  # ---- Market data --------------------------------------------------------
+  data:
+    feed: iex                    # or "sip" if you have the paid subscription
+    primary_timeframe: "5Min"    # the bar series every strategy gets
+    fast_timeframe: "1Min"       # for the scalper / intraday teams
+    slow_timeframe: "1Day"       # for pickers and regime filters
+    history_bars_primary: 500
+    history_bars_fast: 240
+    history_days_slow: 400
+    news_lookback_hours: 72
+    news_limit_per_symbol: 50
+
+# ===========================================================================
+# ROUNDS
+# ===========================================================================
+rounds:
+  - id: 1
+    name: "The Big Three"
+    blurb: >
+      Everyone trades the same three names. No universe selection, no luck --
+      this round measures pure execution and risk management on a fixed menu.
+    universe_mode: fixed
+    symbols: [AAPL, GOOGL, MSFT]
+    picker_enabled: false
+
+  - id: 2
+    name: "Open Market"
+    blurb: >
+      The whole tradable US equity market. Each team's stock picker -- which
+      must share the team's own philosophy -- proposes the shortlist it then
+      trades. Universe selection is now part of the skill being measured.
+    universe_mode: picker
+    picker_enabled: true
+    picker:
+      max_symbols: 12            # shortlist size each team may hold/trade
+      refresh: daily             # re-pick once per session, before the open
+      # Candidate pool the pickers screen from: liquid, priced sanely, US common.
+      candidate_pool: top_active
+      candidate_pool_size: 300
+      liquidity_filter:
+        min_price: 5.0
+        max_price: 5000.0
+        min_avg_dollar_volume: 20000000.0
+        min_avg_trade_count: 5000
+        require_tradable: true
+        require_fractionable: false
+        exclude_leveraged_etf: true
+
+  - id: 3
+    name: "Chaos Draft"
+    blurb: >
+      The top 500 companies are ranked 1..500 by value. Each team is dealt a
+      random 10-ticker hand -- but every hand's rank numbers sum to exactly
+      the same total, so no team is dealt a systematically better deck. Luck
+      decides your cards; skill decides how you play them.
+    universe_mode: draft
+    picker_enabled: true          # the picker now *ranks within* the dealt hand
+    picker:
+      max_symbols: 10             # you may use your whole hand
+      refresh: daily
+    draft:
+      pool_size: 500
+      picks_per_team: 10
+      metric: market_cap          # or `share_price` (computed live from Alpaca)
+      # Fairness constraint: every team's 10 ranks must sum to this exactly.
+      # null => pool_size and picks_per_team imply the fair midpoint
+      # (10 * (500+1)/2 = 2505), i.e. every hand has identical mean rank.
+      rank_sum_target: null
+      rank_sum_exact: true
+      # No ticker is dealt to two teams -- 8 x 10 = 80 of 500, so there is
+      # plenty of room and head-to-head luck is not shared.
+      unique_across_teams: true
+      # Reject a hand that piles up in one sector beyond this share, so
+      # "rank-sum fair" doesn't accidentally mean "all 10 are banks".
+      max_sector_share: 0.40
+      # Also require a spread of ranks: at least this many distinct deciles.
+      min_rank_deciles: 4

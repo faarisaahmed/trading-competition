@@ -1,0 +1,373 @@
+# ===========================================================================
+# THE FIELD -- eight scored teams plus one unscored benchmark.
+#
+# Each team is a (strategy, picker) pair. The RULE from the competition brief:
+# a team's picker must express the same philosophy as its strategy. A momentum
+# trader may not screen for oversold names; the pair trader's picker looks for
+# cointegrated pairs, not for whatever is going up. Each entry documents the
+# philosophy so a reader can verify that coupling.
+#
+# Params are frozen once Round 1 starts. Tuning after the fact is how a
+# competition stops being one, so every value below is checked into git and
+# hashed into the ledger.
+# ===========================================================================
+
+teams:
+  # ------------------------------------------------------------------ 1 ----
+  - key: trend_rider
+    name: "Trend Rider"
+    tagline: "The trend is your friend until the ATR says otherwise."
+    philosophy: >
+      Cross-sectional + time-series momentum. Buys what is already working,
+      ranks candidates by risk-adjusted trend quality, and rides with a
+      volatility-scaled trailing stop. Adds on strength, never on weakness.
+    strategy: competition.strategies.trend_rider:TrendRider
+    picker: competition.pickers.momentum_picker:MomentumPicker
+    scored: true
+    env_prefix: ALPACA_TREND_RIDER
+    params:
+      tick_seconds: 300
+      fast_ema: 12
+      slow_ema: 26
+      roc_period: 20
+      adx_period: 14
+      adx_min: 18.0              # below this the tape is chop -- stand down
+      r2_min: 0.25               # require a reasonably linear advance
+      max_positions: 3
+      target_weight_per_name: 0.32
+      entry_score_min: 0.15
+      exit_score_max: -0.05
+      atr_period: 14
+      trail_atr_mult: 2.5
+      hard_stop_atr_mult: 4.0
+      add_on_profit_atr: 1.5     # pyramid once the trade is 1.5 ATR onside
+      max_adds: 1
+      cooldown_bars_after_stop: 6
+      min_bars_required: 60
+    picker_params:
+      lookback_days_short: 21
+      lookback_days_long: 63
+      vol_lookback_days: 21
+      min_trend_r2: 0.20
+      top_n_multiple: 1.5        # screen 1.5x the slots, keep the best
+
+  # ------------------------------------------------------------------ 2 ----
+  - key: mean_reverter
+    name: "Mean Reverter"
+    tagline: "Everything snaps back. Size the rubber band, not the drama."
+    philosophy: >
+      Buys statistical dislocation: price two-plus sigma below its own short
+      mean with a stretched RSI, sized inverse to volatility, scaled in over
+      two tranches, out at the mean. Refuses names whose measured OU half-life
+      says they don't revert.
+    strategy: competition.strategies.mean_reverter:MeanReverter
+    picker: competition.pickers.reversion_picker:ReversionPicker
+    scored: true
+    env_prefix: ALPACA_MEAN_REVERTER
+    params:
+      tick_seconds: 300
+      band_period: 20
+      band_mult: 2.0
+      entry_z: -2.0
+      second_tranche_z: -3.0
+      exit_z: -0.20
+      stop_z: -4.25
+      rsi_period: 14
+      rsi_entry_max: 32.0
+      rsi_exit_min: 58.0
+      max_half_life_bars: 40.0   # reject non-reverting names
+      max_positions: 3
+      base_weight_per_name: 0.22
+      target_vol_per_name: 0.012  # per-bar vol budget for inverse-vol sizing
+      max_weight_per_name: 0.40
+      time_stop_bars: 78          # ~1 session on 5-min bars
+      regime_filter_slope: -0.004 # don't catch a knife in a hard downtrend
+      cooldown_bars_after_exit: 4
+      min_bars_required: 60
+    picker_params:
+      lookback_days: 120
+      max_half_life_days: 12.0
+      max_variance_ratio: 0.95   # must be anti-trending
+      max_hurst: 0.48
+      min_volatility: 0.015
+      adf_tstat_max: -2.0        # evidence of stationarity around the mean
+
+  # ------------------------------------------------------------------ 3 ----
+  - key: q_learner
+    name: "Q-Learner"
+    tagline: "It doesn't know what a stock is. It knows what worked."
+    philosophy: >
+      Tabular Q-learning over a discretised state (trend bucket, dislocation
+      bucket, volatility regime, current position) choosing among flat / half /
+      full exposure. Reward is ATR-normalised P&L minus a turnover penalty.
+      Pre-trained offline on historical bars, then keeps learning online with
+      a decaying epsilon. Its picker is a LinUCB contextual bandit -- same
+      "learn from reward" philosophy, applied to universe selection.
+    strategy: competition.strategies.q_learner:QLearner
+    picker: competition.pickers.bandit_picker:BanditPicker
+    scored: true
+    env_prefix: ALPACA_Q_LEARNER
+    params:
+      tick_seconds: 300
+      alpha: 0.10                # learning rate
+      gamma: 0.92                # discount
+      epsilon_start: 0.10       # lower than a from-scratch agent: it is pre-trained
+      epsilon_end: 0.02
+      epsilon_decay_steps: 4000
+      optimistic_init: 0.05      # encourages early exploration
+      # Bucket edges are calibrated to the 5Min primary timeframe: a per-bar
+      # regression slope of 0.0006 is a strong intraday trend and an ATR of
+      # 0.25% of price is a normal 5-minute range for a large cap. Daily-scale
+      # edges would collapse every observation into one bucket and the agent
+      # would learn nothing.
+      trend_buckets: [-0.0006, -0.0002, 0.0002, 0.0006]
+      zscore_buckets: [-1.5, -0.5, 0.5, 1.5]
+      vol_buckets: [0.0012, 0.0025, 0.005]
+      exposure_actions: [0.0, 0.15, 0.32]   # per-symbol target weights
+      # Calibrated to the real cost of a round trip in reward units: reward is
+      # P&L/ATR%, so ~8bps of slippage against a ~25bps ATR is ~0.3. At 0.02 the
+      # agent churned 117x its bankroll in four days and lost 6.5% to spreads.
+      turnover_penalty: 0.35
+      action_repeat: 3           # hold an exposure 3 bars before re-deciding
+      drawdown_penalty: 0.5
+      reward_clip: 3.0
+      max_positions: 3
+      atr_period: 14
+      min_bars_required: 80
+      persist_qtable: true       # learning carries across rounds
+    picker_params:
+      ucb_alpha: 1.2             # exploration width
+      ridge_lambda: 1.0
+      feature_set: [momentum_21, momentum_63, vol_21, rel_volume, dist_from_high, atr_pct]
+      reward_horizon_days: 3
+      min_pulls_before_exploit: 2
+
+  # ------------------------------------------------------------------ 4 ----
+  - key: gambler
+    name: "The Gambler"
+    tagline: "Kelly said bet the edge. Kelly never said how big the edge was."
+    philosophy: >
+      Deliberately high-variance. Estimates a win probability and payoff ratio
+      from the recent tape, sizes with a *fractional Kelly multiplied up*, and
+      concentrates. After a loss it steps size up (bounded, 3 rungs); after a
+      win it resets. Prefers lottery-like names: high vol, wide range, gappy.
+      Exists to answer "does variance-seeking beat discipline over 3 weeks?"
+    strategy: competition.strategies.gambler:Gambler
+    picker: competition.pickers.lottery_picker:LotteryPicker
+    scored: true
+    env_prefix: ALPACA_GAMBLER
+    params:
+      tick_seconds: 180
+      lookback_bars: 60
+      kelly_fraction: 0.85       # aggressive fraction of full Kelly
+      kelly_multiplier: 1.6      # ...and then some
+      min_edge: 0.015            # needs a perceived edge to fire at all
+      max_positions: 2
+      max_weight_per_name: 0.90  # yes, it can go nearly all-in
+      martingale_rungs: [1.0, 1.45, 1.9]
+      cool_off_after_rungs: 8    # bars to sit out after exhausting the ladder
+      take_profit_atr: 3.0
+      stop_atr: 2.0              # asymmetric: cut fast, let winners run
+      trail_after_atr: 2.0
+      session_loss_cap_pct: 0.28 # self-imposed, tighter than the engine's
+      min_bars_required: 45
+    picker_params:
+      lookback_days: 63
+      min_volatility: 0.030      # annualised-ish daily sigma floor
+      min_gap_frequency: 0.10    # fraction of days gapping >1.5%
+      min_range_expansion: 1.05
+      prefer_high_beta: true
+      max_price: 900.0           # keep positions divisible
+
+  # ------------------------------------------------------------------ 5 ----
+  - key: stat_arb
+    name: "Stat Arb"
+    tagline: "I don't care where the market goes. I care where the spread goes."
+    philosophy: >
+      Relative value. Finds pairs with a stationary spread (correlation, OLS
+      hedge ratio, ADF t-stat, half-life), then trades the spread's z-score.
+      Because the competition is long-only, it expresses the pair as a
+      *rotation*: hold the cheap leg, switch when the spread flips, flat when
+      the spread is fair. Market-neutral in spirit, cash-account in practice.
+    strategy: competition.strategies.stat_arb:StatArb
+    picker: competition.pickers.pair_picker:PairPicker
+    scored: true
+    env_prefix: ALPACA_STAT_ARB
+    params:
+      tick_seconds: 300
+      formation_bars: 240
+      min_correlation: 0.65
+      max_half_life_bars: 60.0
+      adf_tstat_max: -1.8
+      entry_z: 1.6
+      exit_z: 0.35
+      stop_z: 3.75
+      max_pairs: 2
+      weight_per_pair: 0.42
+      rebalance_z_delta: 0.6     # don't churn on small spread moves
+      refit_every_bars: 78       # re-estimate beta once per session
+      time_stop_bars: 156
+      min_bars_required: 120
+      # Round 3 may deal ten names containing no cointegrated pair. Rather
+      # than sit out the week, fall back to a bounded relaxed screen at half
+      # size -- weaker evidence, less capital.
+      allow_relaxed_pairs: true
+      relaxed_correlation_delta: 0.15
+      relaxed_adf_delta: 0.8
+      relaxed_half_life_mult: 1.6
+      relaxed_weight_mult: 0.5
+    picker_params:
+      lookback_days: 180
+      max_candidates: 60
+      min_correlation: 0.70
+      adf_tstat_max: -2.2
+      max_half_life_days: 20.0
+      same_sector_bonus: 0.15    # cointegration is more trustworthy in-sector
+      pairs_to_return: 5
+
+  # ------------------------------------------------------------------ 6 ----
+  - key: news_hound
+    name: "News Hound"
+    tagline: "The tape tells you what happened. The wire tells you why."
+    philosophy: >
+      Event-driven. Scores the Alpaca news wire with a finance-tuned sentiment
+      lexicon (no LLM -- a deterministic, checked-in dictionary plus negation
+      and intensifier handling), decays by age, weights by source and by how
+      exclusively the story is about that ticker, then requires price
+      confirmation before buying. Exits on sentiment decay or a time stop.
+    strategy: competition.strategies.news_hound:NewsHound
+    picker: competition.pickers.newsflow_picker:NewsFlowPicker
+    scored: true
+    env_prefix: ALPACA_NEWS_HOUND
+    params:
+      tick_seconds: 120
+      sentiment_entry: 0.28
+      sentiment_exit: 0.05
+      min_articles: 2
+      half_life_hours: 8.0       # story relevance decay
+      confirmation_roc_bars: 6
+      confirmation_min_roc: 0.0005   # tape must agree, at least faintly
+      max_chase_pct: 0.045       # refuse to buy more than 4.5% off the news
+      max_positions: 3
+      weight_per_name: 0.30
+      take_profit_pct: 0.055
+      stop_loss_pct: 0.028
+      time_stop_hours: 30.0
+      stale_news_hours: 48.0
+      min_bars_required: 30
+    picker_params:
+      lookback_hours: 72
+      min_articles: 3
+      score_weight_volume: 0.35  # how loud the coverage is
+      score_weight_sentiment: 0.65
+      require_positive: true
+
+  # ------------------------------------------------------------------ 7 ----
+  - key: vol_breakout
+    name: "Vol Breakout"
+    tagline: "Quiet, quiet, quiet -- then you have to already be in."
+    philosophy: >
+      Volatility-regime trading. Waits for a squeeze (Bollinger bandwidth in
+      its own low percentile), then buys the Donchian channel break confirmed
+      by range and volume expansion. Exits on a Chandelier trail. Its picker
+      hunts coiled springs, not current winners.
+    strategy: competition.strategies.vol_breakout:VolBreakout
+    picker: competition.pickers.squeeze_picker:SqueezePicker
+    scored: true
+    env_prefix: ALPACA_VOL_BREAKOUT
+    params:
+      tick_seconds: 300
+      donchian_period: 20
+      squeeze_lookback: 120          # bandwidth history, used only for ranking
+      # The squeeze gate is TTM-style: Bollinger band entirely inside the
+      # Keltner channel, i.e. 2*stdev < 1.5*ATR. Duration-independent, unlike
+      # a bandwidth percentile, which saturates when a name has been quiet
+      # for a long time -- exactly the setups worth taking.
+      squeeze_period: 20
+      bollinger_mult: 2.0
+      keltner_mult: 1.5
+      # The squeeze may have released up to this many bars ago, because the
+      # breakout bar itself widens the bands.
+      squeeze_release_bars: 12
+      breakout_buffer_atr: 0.15      # break must clear the band by 0.15 ATR
+      volume_expansion_min: 1.35     # vs its own 20-bar average
+      range_expansion_min: 1.20
+      atr_period: 14
+      chandelier_mult: 2.75
+      initial_stop_atr: 1.75
+      max_positions: 3
+      weight_per_name: 0.31
+      opening_range_minutes: 30
+      use_opening_range: true
+      failed_break_bars: 4           # break must hold 4 bars or it's a fake
+      cooldown_bars_after_stop: 8
+      min_bars_required: 130
+    picker_params:
+      lookback_days: 120
+      bandwidth_percentile_max: 0.30
+      # Floor on the name's NORMAL 60-day ATR, not its current one: a tight
+      # coil has low recent ATR by definition, so gating on that would reject
+      # the best setups this picker exists to find.
+      min_atr_pct: 0.012
+      normal_atr_days: 60
+      min_avg_dollar_volume: 25000000.0
+      prefer_coiled_days: 5          # consecutive quiet days
+
+  # ------------------------------------------------------------------ 8 ----
+  - key: scalper
+    name: "The Scalper"
+    tagline: "A penny a hundred times beats a dollar you waited all week for."
+    philosophy: >
+      Microstructure. Computes a microprice fair value from top-of-book sizes
+      plus a short-horizon order-flow drift, then works passive limit bids
+      below fair value and passive offers above it, skewed by inventory.
+      Hundreds of small round trips, inventory capped, flat into the close.
+    strategy: competition.strategies.scalper:Scalper
+    picker: competition.pickers.liquidity_picker:LiquidityPicker
+    scored: true
+    env_prefix: ALPACA_SCALPER
+    params:
+      tick_seconds: 20
+      edge_bps: 6.0               # required edge vs fair value to post
+      min_relative_spread: 0.00035
+      max_relative_spread: 0.0060 # too wide = something is wrong, stay out
+      inventory_cap_pct: 0.30     # per name
+      total_inventory_cap_pct: 0.75
+      clip_notional: 240.0        # size of one working order
+      max_open_orders_per_symbol: 1
+      skew_per_inventory_unit: 0.65
+      imbalance_weight: 0.35
+      drift_bars: 5
+      drift_weight: 0.45
+      requote_bps: 2.5            # move the quote if fair value drifts this far
+      order_ttl_seconds: 90
+      take_profit_bps: 12.0
+      stop_bps: 45.0
+      max_positions: 4
+      flatten_minutes_before_close: 15
+      min_bars_required: 20
+    picker_params:
+      lookback_days: 21
+      max_relative_spread: 0.0020
+      min_trade_count: 20000
+      min_avg_dollar_volume: 100000000.0
+      prefer_low_daily_vol: true   # want chop, not trend
+
+  # ------------------------------------------------- unscored reference ----
+  - key: benchmark
+    name: "Buy & Hold (benchmark)"
+    tagline: "Does any of this beat just owning the thing?"
+    philosophy: >
+      Not a competitor. Buys an equal-weight basket of its universe on the
+      first tick of the round and never trades again. Present in every report
+      so each team's result can be read against the market it faced.
+    strategy: competition.strategies.benchmark:BuyAndHold
+    picker: competition.pickers.megacap_picker:MegaCapPicker
+    scored: false
+    env_prefix: ALPACA_BENCHMARK
+    params:
+      tick_seconds: 900
+      max_positions: 10
+      cash_buffer_pct: 0.02
+    picker_params:
+      top_n_by_value: 10

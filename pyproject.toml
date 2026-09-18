@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trading-competition"
+version = "1.0.0"
+description = "2026 Model Trading Competition -- 8 autonomous strategies, 3 rounds, Alpaca paper accounts."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24", "PyYAML>=6.0", "requests>=2.28"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "pytest-cov>=4.1", "ruff>=0.5"]
+
+[project.scripts]
+comp = "competition.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+competition = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+# B008: FastAPI-style default calls are not a concern here.
+# E741: `l` is used as a loop variable in the Easter algorithm, matching the
+#       published formulation.
+ignore = ["B008", "E741"]
+
+[tool.ruff.lint.per-file-ignores]
+# The optional lifecycle hooks (on_round_start, on_fill, ...) are empty on
+# purpose and deliberately NOT abstract: forcing all nine teams to implement
+# five no-op methods would be pure noise. Only `on_tick` is abstract.
+"src/competition/strategies/base.py" = ["B027"]
+"src/competition/pickers/base.py" = ["B027"]
+"src/competition/broker/base.py" = ["B027"]
+"src/competition/data/feed.py" = ["B027"]
