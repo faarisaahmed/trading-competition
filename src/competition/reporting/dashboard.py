@@ -112,6 +112,7 @@ class DashboardData:
     ticks: int = 0
     last_tick: datetime | None = None
     mode: str = ""
+    broker: str = ""
     resumed: bool = False
     teams: list[TeamRow] = field(default_factory=list)
     tape: list[dict[str, Any]] = field(default_factory=list)
@@ -153,6 +154,26 @@ class DashboardData:
     def round_complete(self) -> bool:
         return bool(self.round_end and self.generated_at.date() > self.round_end)
 
+    @property
+    def is_live(self) -> bool:
+        """True only for a real round against real paper accounts.
+
+        A dashboard you leave open for a week must never be ambiguous about
+        whether the money is real. Anything that is not an Alpaca-backed live
+        run is simulated, and says so in a banner.
+        """
+        return self.mode == "live" and self.broker.startswith("alpaca")
+
+    @property
+    def data_source(self) -> str:
+        if self.is_live:
+            return "live Alpaca paper accounts"
+        if "synthetic" in self.broker:
+            return "simulated fills on synthetic prices"
+        if self.broker.startswith("sim"):
+            return "simulated fills on historical prices"
+        return f"{self.mode or 'unknown'} / {self.broker or 'unknown'}"
+
 
 def build_dashboard_data(
     cfg: CompetitionConfig,
@@ -184,6 +205,26 @@ def build_dashboard_data(
         resumed=bool(getattr(engine, "resuming", False)),
         ticks=int(getattr(engine, "_ticks", 0) or 0),
     )
+
+    # Where did this data actually come from? Taken from the run record and,
+    # when an engine is present, corroborated against the broker classes
+    # actually in use -- a run cannot label itself live if it is holding
+    # simulators.
+    runs = ledger.runs()
+    if runs:
+        data.broker = str(runs[-1]["broker"] or "")
+        if not data.mode:
+            data.mode = str(runs[-1]["mode"] or "")
+    if engine is not None and engine.teams:
+        classes = {type(rt.broker).__name__ for rt in engine.teams.values()}
+        if classes and not any(c == "AlpacaBroker" for c in classes):
+            # Contradict a bogus "alpaca" label, but keep any recorded detail
+            # (e.g. "sim/synthetic") -- overwriting it wholesale loses the very
+            # information the banner needs to describe the source.
+            if data.broker.startswith("alpaca") or not data.broker:
+                data.broker = "sim"
+            if data.mode == "live":
+                data.mode = "simulated"
 
     # -- round window and the clock ---------------------------------------- #
     window = getattr(engine, "round_window", None) if engine is not None else None
@@ -524,6 +565,20 @@ def _equity_chart(data: DashboardData) -> str:
 # --------------------------------------------------------------------------- #
 # sections
 # --------------------------------------------------------------------------- #
+
+
+def _banner(data: DashboardData) -> str:
+    """A standing warning whenever the numbers are not real money."""
+    if data.is_live:
+        return ""
+    return (
+        '<section class="banner" role="status">'
+        '<strong>Simulated data \u2014 this is not a live competition.</strong> '
+        f'Source: {_e(data.data_source)}. No orders were sent to a broker and '
+        'no account balances changed. Returns here say nothing about how these '
+        'strategies would perform on a real tape.'
+        '</section>'
+    )
 
 
 def _stat_tiles(data: DashboardData) -> str:
@@ -917,6 +972,11 @@ def _styles(slots: Mapping[str, int]) -> str:
               margin: 0; font-size: 12.5px; }}
   .card dt {{ color: var(--muted); white-space: nowrap; }}
   .card dd {{ margin: 0; overflow-wrap: anywhere; }}
+  .banner {{ background: var(--surface); border: 1px solid var(--warning);
+             border-left: 4px solid var(--warning); border-radius: 8px;
+             padding: 11px 15px; margin-bottom: 16px; font-size: 13px;
+             color: var(--text-secondary); }}
+  .banner strong {{ color: var(--text-primary); }}
   .empty {{ color: var(--muted); padding: 34px 0; text-align: center; }}
   footer {{ color: var(--muted); font-size: 11.5px; margin-top: 22px;
             display: flex; gap: 16px; flex-wrap: wrap; }}
@@ -966,6 +1026,7 @@ def render_dashboard(cfg: CompetitionConfig, data: DashboardData, *,
   </div>
 </header>
 
+{_banner(data)}
 {_stat_tiles(data)}
 
 <section class="panel">
@@ -979,7 +1040,7 @@ def render_dashboard(cfg: CompetitionConfig, data: DashboardData, *,
 {_tape(data)}
 
 <footer>
-  <span>mode: {_e(data.mode or 'idle')}</span>
+  <span>data: {_e(data.data_source)}</span>
   <span>rules: {_e(data.rules_hash)}</span>
   <span>bankroll: {_money(cfg.starting_cash)} per team per round</span>
   <span>auto-refresh: {refresh}s</span>

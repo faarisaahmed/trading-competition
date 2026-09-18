@@ -293,6 +293,11 @@ tests, including 72 that do nothing but attack the draft.
 
 ![dashboard](docs/dashboard.png)
 
+Any run that is not a live Alpaca round carries that banner. The dashboard
+cross-checks the claim against the broker objects actually in use, so a run
+cannot present itself as live while holding simulators — a dashboard you leave
+open for a week must never be ambiguous about whether the money is real.
+
 The chart obeys a few rules worth naming, because they are the ones usually
 broken: **one y-axis** (all nine curves are dollars from the same bankroll, so
 a second scale would invent a correlation); **colour follows the team, not its
@@ -352,10 +357,12 @@ does not publish, so `data/top500.csv` carries them as a dated snapshot that
 ## Caveats, stated plainly
 
 * **The synthetic backtest is a plumbing test, not evidence.** It exists so the
-  whole competition can be validated without credentials. Its news wire is
-  generated to *lead* price, so News Hound looks good in a dry run for reasons
-  that will not hold on a real tape. Do not read the sim leaderboard as a
-  prediction.
+  whole competition can be validated without credentials. The prices are
+  manufactured by a random-number generator and the fills are simulated in
+  process — nothing reaches a broker. Its news wire is generated to *lead*
+  price, so News Hound looks good in a dry run for reasons that will not hold
+  on a real tape. Do not read the sim leaderboard as a prediction; the
+  dashboard banners every such run for exactly this reason.
 * **Long-only is a real handicap for two teams.** Stat Arb cannot short its
   rich leg and expresses pairs as a rotation instead; The Scalper cannot quote
   both sides from flat. Both adaptations are documented in their modules and

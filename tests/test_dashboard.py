@@ -339,3 +339,93 @@ def test_a_broken_dashboard_cannot_stop_a_round(cfg, feed, tmp_path, calendar):
     engine.set_dashboard(explode)
     engine.tick(rnd, now=clock["now"])          # must not raise
     ledger.close()
+
+
+# --------------------------------------------------------------------------- #
+# the simulated-data banner
+# --------------------------------------------------------------------------- #
+#
+# A dashboard left open for a week must never be ambiguous about whether the
+# money is real. This came from a live mistake: a demo run was labelled
+# mode="live", broker="alpaca" in the ledger purely so the page looked
+# realistic, and the result was indistinguishable from a real competition.
+
+
+def _run_labelled(cfg, tmp_path, mode: str, broker: str):
+    ledger = Ledger(tmp_path / f"{mode}-{broker.replace('/', '-')}.sqlite")
+    ledger.start_run(round_id=1, mode=mode, broker=broker,
+                     rules_hash=cfg.rules_hash, seed=1, config={})
+    ledger.open_round(round_id=1, start=date(2026, 9, 8), end=date(2026, 9, 14),
+                      mode=mode, broker=broker, rules_hash=cfg.rules_hash)
+    return ledger
+
+
+@pytest.mark.parametrize("mode,broker", [
+    ("backtest", "sim/synthetic"),
+    ("backtest", "sim/alpaca"),
+    ("test", "sim"),
+    ("demo", "sim/synthetic"),
+    ("", ""),
+])
+def test_simulated_runs_carry_a_banner(cfg, tmp_path, mode, broker):
+    ledger = _run_labelled(cfg, tmp_path, mode, broker)
+    data = build_dashboard_data(cfg, ledger=ledger, round_id=1)
+    assert data.is_live is False
+    out = render_dashboard(cfg, data)
+    assert "not a live competition" in out
+    assert 'class="banner"' in out
+    ledger.close()
+
+
+def test_a_genuine_live_run_has_no_banner(cfg, tmp_path):
+    ledger = _run_labelled(cfg, tmp_path, "live", "alpaca")
+    data = build_dashboard_data(cfg, ledger=ledger, round_id=1)
+    assert data.is_live is True
+    assert data.data_source == "live Alpaca paper accounts"
+    assert "not a live competition" not in render_dashboard(cfg, data)
+    ledger.close()
+
+
+def test_the_source_description_keeps_its_detail(cfg, tmp_path):
+    ledger = _run_labelled(cfg, tmp_path, "backtest", "sim/synthetic")
+    data = build_dashboard_data(cfg, ledger=ledger, round_id=1)
+    assert "synthetic" in data.data_source
+    ledger.close()
+    ledger = _run_labelled(cfg, tmp_path, "backtest", "sim/alpaca")
+    data = build_dashboard_data(cfg, ledger=ledger, round_id=1)
+    assert "historical" in data.data_source
+    ledger.close()
+
+
+def test_a_live_label_is_overridden_when_the_brokers_are_simulators(
+        cfg, feed, tmp_path, calendar):
+    """A run cannot claim to be live while holding simulators.
+
+    This is the exact mistake that prompted the banner: the ledger label said
+    live/alpaca, the brokers were all SimulatedBroker, and the page looked real.
+    """
+    from competition.broker.simulated import SimConfig, SimulatedBroker
+    from competition.data.universe import UniverseProvider
+    from competition.engine import CompetitionEngine, UniverseResolver
+
+    clock = {"now": calendar.session_times(date(2026, 9, 8))[0]}
+    brokers = {
+        t.key: SimulatedBroker(cfg.starting_cash, feed.quote_source(
+            lambda: clock["now"]), name=t.key, config=SimConfig(),
+            clock=lambda: clock["now"])
+        for t in cfg.teams
+    }
+    ledger = _run_labelled(cfg, tmp_path, "live", "alpaca")   # a false label
+    engine = CompetitionEngine(
+        cfg, feed=feed, brokers=brokers, ledger=ledger,
+        resolver=UniverseResolver(cfg, provider=UniverseProvider(),
+                                  daily_bars=lambda s: {}, news=lambda s: {}),
+        mode="live", clock=lambda: clock["now"], equity_snapshot_seconds=1,
+    )
+    engine.round_window = (date(2026, 9, 8), date(2026, 9, 14))
+    engine.prepare_round(cfg.round(1), session=date(2026, 9, 8))
+
+    data = build_dashboard_data(cfg, engine=engine)
+    assert data.is_live is False, "a simulator-backed run must not read as live"
+    assert "not a live competition" in render_dashboard(cfg, data)
+    ledger.close()
