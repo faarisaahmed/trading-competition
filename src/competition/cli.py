@@ -21,6 +21,7 @@ import argparse
 import json
 import logging
 import sys
+import time
 from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -48,6 +49,7 @@ from .setup import (
     render_env,
     render_template,
     report,
+    targets_for,
     write_env,
 )
 
@@ -82,6 +84,13 @@ def _setup_logging(verbosity: int, *, quiet: bool = False) -> None:
     if verbosity < 2:
         logging.getLogger("urllib3").setLevel(logging.WARNING)
         logging.getLogger("competition.alpaca").setLevel(logging.INFO)
+
+
+def _team_keys(cfg: CompetitionConfig, only: Sequence[str] | None) -> list[str] | None:
+    """The --team filter as bare keys, or None when unfiltered."""
+    if not only:
+        return None
+    return [t.key for t in _teams_for(cfg, only)]
 
 
 def _teams_for(cfg: CompetitionConfig, only: Sequence[str] | None) -> list:
@@ -159,16 +168,87 @@ def _attach_dashboard(engine, cfg: CompetitionConfig, args) -> None:
     target = getattr(args, "dashboard", None)
     if not target:
         return
-    from .reporting import write_dashboard
+    from .reporting.dashboard import build_dashboard_data, render_dashboard
 
     path = Path(target)
     refresh = getattr(args, "dashboard_refresh", 30)
 
+    schedule = getattr(args, "_schedule", None)
+    publisher = _publisher(cfg, args)
+
     def write(eng) -> None:
-        write_dashboard(cfg, path, engine=eng, refresh=refresh)
+        data = build_dashboard_data(cfg, engine=eng)
+        _stamp_season(data, cfg, schedule)
+        html = render_dashboard(cfg, data, refresh=refresh)
+        _atomic_write(path, html)
+        if publisher is not None:
+            publisher(html)
 
     engine.set_dashboard(write)
     _print(f"  dashboard: {path}  (refreshes every {refresh}s)")
+
+
+def _atomic_write(path: Path, html: str) -> None:
+    """A browser refreshing every 30s will otherwise catch a half-written file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(html, encoding="utf-8")
+    tmp.replace(path)
+
+
+def _stamp_season(data, cfg: CompetitionConfig, schedule) -> None:
+    """Attach the season clock to a dashboard payload."""
+    if schedule is None:
+        return
+    from .schedule import next_deadline
+
+    state = schedule.state(utcnow())
+    label, when = next_deadline(state)
+    data.season_phase = state.phase
+    data.deadline_label = label
+    data.deadline_at = when
+    now = utcnow()
+    plan = []
+    for w in schedule.windows:
+        if w.is_past(now):
+            st = "done"
+        elif w.contains(now):
+            st = "live"
+        else:
+            st = "upcoming"
+        plan.append({
+            "round_id": w.round_id,
+            "name": w.name,
+            "window": f"{w.start_date:%a %d %b} - {w.end_date:%a %d %b}",
+            "state": st,
+        })
+    data.season_plan = plan
+
+
+def _publisher(cfg: CompetitionConfig, args):
+    """A rate-limited callable that pushes the page to GitHub Pages."""
+    pub = cfg.schedule.publish
+    if not pub.enabled or getattr(args, "no_publish", False):
+        return None
+    from .reporting.publish import PublishError, publish
+
+    repo = Path.cwd()
+    state = {"last": 0.0}
+
+    def push(html: str) -> None:
+        now = time.monotonic()
+        if now - state["last"] < pub.every_seconds:
+            return
+        state["last"] = now
+        try:
+            result = publish(html, repo=repo, branch=pub.branch)
+            log.info("published dashboard %s (%d bytes)", result.commit,
+                     result.bytes_written)
+        except PublishError as e:
+            # Publishing is cosmetic. A GitHub outage must never stop trading.
+            log.warning("could not publish the dashboard: %s", e)
+
+    return push
 
 
 def _print(text: str) -> None:
@@ -1157,6 +1237,190 @@ def cmd_run(args, cfg: CompetitionConfig) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# the season: run all three rounds unattended
+# --------------------------------------------------------------------------- #
+
+
+def _build_schedule(cfg: CompetitionConfig, cal, *, start: date | None = None):
+    from .schedule import SeasonSchedule
+
+    first = start or cfg.schedule.start_date
+    if first is None:
+        first = cal.next_trading_day(date.today(), inclusive=True)
+    return SeasonSchedule.build(
+        rounds=[(r.id, r.name) for r in cfg.rounds],
+        first_start=first,
+        sessions_per_round=cfg.schedule.sessions_per_round,
+        calendar=cal,
+        gap_sessions=cfg.schedule.gap_sessions,
+    )
+
+
+def _idle_dashboard(cfg, args, schedule, *, note: str = "") -> str | None:
+    """Render (and publish) the between-rounds page: a clock and standings."""
+    from .reporting.dashboard import build_dashboard_data, render_dashboard
+
+    if not getattr(args, "dashboard", None):
+        return None
+    ledger = Ledger(args.ledger)
+    try:
+        runs = ledger.runs()
+        if runs:
+            ledger.run_id = runs[-1]["run_id"]
+        data = build_dashboard_data(cfg, ledger=ledger)
+    except Exception as e:  # noqa: BLE001 -- an idle page must never crash a season
+        log.warning("could not build the idle dashboard: %s", e)
+        ledger.close()
+        return None
+    ledger.close()
+    _stamp_season(data, cfg, schedule)
+    html = render_dashboard(cfg, data,
+                            refresh=getattr(args, "dashboard_refresh", 30))
+    _atomic_write(Path(args.dashboard), html)
+    return html
+
+
+def _publish_now(cfg, args, html: str | None) -> None:
+    if html is None or not cfg.schedule.publish.enabled:
+        return
+    if getattr(args, "no_publish", False):
+        return
+    from .reporting.publish import PublishError, publish
+
+    try:
+        result = publish(html, repo=Path.cwd(), branch=cfg.schedule.publish.branch)
+        log.info("published %s", result.commit)
+    except PublishError as e:
+        log.warning("could not publish: %s", e)
+
+
+def cmd_season(args, cfg: CompetitionConfig) -> int:
+    """Run the whole season start to finish with no human in the loop.
+
+    This is the command that is meant to be left running. It waits for each
+    round's opening bell, runs it live, lets the engine flatten and score at
+    the close, then rolls straight into the next round. Everything it does is
+    derived from the schedule and the market calendar, so a restart at any
+    point picks up exactly where it left off.
+    """
+    reader = _data_reader(cfg)
+    if reader is None:
+        _print("ERROR: a live season needs market-data credentials. See .env.example.")
+        return 1
+    cal = MarketCalendar.from_alpaca(reader.client)
+
+    try:
+        schedule = _build_schedule(cfg, cal, start=_parse_date(args.start))
+    except ValueError as e:
+        _print(f"ERROR: {e}")
+        return 2
+
+    _print(f"{cfg.name}  --  season {cfg.season}")
+    for line in schedule.describe():
+        _print(f"  {line}")
+    _print(f"  bankroll : ${cfg.starting_cash:,.2f} per team per round")
+    _print(f"  teams    : {len(cfg.teams)} ({len(cfg.scored_teams)} scored)")
+    pub = cfg.schedule.publish
+    if pub.enabled and not args.no_publish:
+        from .reporting.publish import pages_url
+        url = pages_url(Path.cwd(), pub.branch)
+        _print(f"  publish  : {url or pub.branch} every {pub.every_seconds}s")
+    _print("")
+
+    if args.dry_run:
+        state = schedule.state(utcnow())
+        from .schedule import humanise, next_deadline
+        label, when = next_deadline(state)
+        _print(f"phase now: {state.phase}")
+        if when:
+            secs = (when - utcnow()).total_seconds()
+            _print(f"{label}: {humanise(secs)}  ({when:%a %d %b %H:%M} UTC)")
+        _print("\n--dry-run: schedule resolved, not trading.")
+        return 0
+
+    # The dashboard hook needs the schedule to render the countdown.
+    args._schedule = schedule
+    done: set[int] = set()
+
+    while True:
+        now = utcnow()
+        state = schedule.state(now)
+
+        if state.is_finished:
+            _print("\nSeason complete.")
+            _print("")
+            rc = cmd_leaderboard(args, cfg)
+            _publish_now(cfg, args, _idle_dashboard(cfg, args, schedule))
+            return rc
+
+        if state.current is None or state.current.round_id in done:
+            # Between rounds: show the countdown and wait for the bell.
+            from .schedule import humanise
+
+            wait = state.seconds_to_start
+            if wait is None:
+                time.sleep(30)
+                continue
+            nxt = state.next
+            _print(f"waiting for round {nxt.round_id} ({nxt.name}): "
+                   f"{humanise(wait)} -- opens {nxt.opens_at:%a %d %b %H:%M} UTC")
+            _publish_now(cfg, args, _idle_dashboard(cfg, args, schedule))
+            # Wake up often enough to keep the published clock fresh, and to
+            # notice a machine that slept through the open.
+            time.sleep(min(wait + 1, max(pub.every_seconds, 60)))
+            continue
+
+        # A round is live. Hand off to the existing runner, which blocks until
+        # the closing bell, flattens every book, scores and records.
+        window = state.current
+        _print("")
+        _print("=" * 68)
+        _print(f"ROUND {window.round_id}: {window.name}   "
+               f"{window.start_date:%a %d %b} -> {window.end_date:%a %d %b}")
+        _print("=" * 68)
+
+        round_args = _RoundArgs(args, round_id=window.round_id,
+                                start=window.start_date, end=window.end_date)
+        try:
+            rc = cmd_run(round_args, cfg)
+        except KeyboardInterrupt:
+            _print("\nseason interrupted.")
+            return 130
+        if rc != 0:
+            _print(f"\nERROR: round {window.round_id} exited with code {rc}; "
+                   f"stopping the season. Fix the problem and re-run "
+                   f"`comp season` -- it will resume where it left off.")
+            return rc
+
+        done.add(window.round_id)
+        _publish_now(cfg, args, _idle_dashboard(cfg, args, schedule))
+        if not cfg.schedule.auto_advance:
+            _print("\nauto_advance is off; stopping after this round.")
+            return 0
+
+
+class _RoundArgs:
+    """`cmd_run`'s argument surface, derived from the season's own args.
+
+    A shim rather than a rebuilt parser namespace, so the two commands cannot
+    drift apart: anything `run` grows is inherited here automatically.
+    """
+
+    def __init__(self, base, *, round_id: int, start: date, end: date):
+        self._base = base
+        self.round = round_id
+        self.start = start.isoformat()
+        self.end = end.isoformat()
+        # A season never abandons an interrupted round: resuming is the whole
+        # point of being restartable.
+        self.fresh = False
+        self.dry_run = False
+
+    def __getattr__(self, name):
+        return getattr(self._base, name)
+
+
+# --------------------------------------------------------------------------- #
 # account setup
 # --------------------------------------------------------------------------- #
 
@@ -1164,7 +1428,11 @@ def cmd_run(args, cfg: CompetitionConfig) -> int:
 def cmd_setup_accounts(args, cfg: CompetitionConfig) -> int:
     """Parse, verify and write the nine key pairs."""
     env_path = Path(args.env_out)
-    teams = _teams_for(cfg, args.team)
+    # One credential pair per REAL account: a team in per_team mode, a whole
+    # group in shared mode. Counting teams here would demand nine pairs for
+    # three accounts.
+    _teams_for(cfg, args.team)          # validates the --team keys
+    teams = targets_for(cfg, only=_team_keys(cfg, args.team))
 
     if args.template:
         sys.stdout.write(render_template(cfg))
@@ -1204,7 +1472,7 @@ def cmd_setup_accounts(args, cfg: CompetitionConfig) -> int:
         if not pairs:
             _print("No credentials given; nothing written.")
             return 1
-        bound = assign(cfg, pairs, only=[t.key for t in teams])
+        bound = assign(cfg, pairs, only=_team_keys(cfg, args.team))
     except SetupError as e:
         _print(f"ERROR: {e}")
         return 2
@@ -1214,7 +1482,8 @@ def cmd_setup_accounts(args, cfg: CompetitionConfig) -> int:
 
     missing = [t.key for t in teams if t.key not in {b[0].key for b in bound}]
     if missing:
-        _print(f"\n  {len(missing)} team(s) have no credentials: "
+        noun = teams[0].noun if teams else "team"
+        _print(f"\n  {len(missing)} {noun}(s) have no credentials: "
                f"{', '.join(missing)}")
         if not args.allow_missing:
             _print("  Pass --allow-missing to write a partial .env anyway, or "
@@ -1285,7 +1554,6 @@ def _prompt_for_pairs(teams: Sequence) -> list[Pair]:
 
 
 def cmd_dashboard(args, cfg: CompetitionConfig) -> int:
-    from .reporting import write_dashboard
 
     ledger = Ledger(args.ledger)
     if args.run_id:
@@ -1302,8 +1570,19 @@ def cmd_dashboard(args, cfg: CompetitionConfig) -> int:
         else:
             scored = [r.id for r in cfg.rounds if ledger.results_for_round(r.id)]
             round_id = scored[-1] if scored else None
-    out = write_dashboard(cfg, args.out, ledger=ledger, round_id=round_id,
-                          refresh=args.refresh)
+    from .reporting.dashboard import build_dashboard_data, render_dashboard
+
+    # Stamp the season clock so the standalone page carries the same countdown
+    # the live one does.
+    schedule = None
+    try:
+        schedule = _build_schedule(cfg, MarketCalendar())
+    except (ValueError, KeyError) as e:
+        log.debug("no season schedule for the dashboard: %s", e)
+    data = build_dashboard_data(cfg, ledger=ledger, round_id=round_id)
+    _stamp_season(data, cfg, schedule)
+    out = Path(args.out)
+    _atomic_write(out, render_dashboard(cfg, data, refresh=args.refresh))
     ledger.close()
     _print(f"wrote {out}")
     if args.round is None and round_id is None:
@@ -1630,8 +1909,35 @@ def build_parser() -> argparse.ArgumentParser:
                     help="run only the teams that have credentials")
     rn.add_argument("--force", action="store_true",
                     help="start even if account equities differ")
+    rn.add_argument("--no-publish", action="store_true",
+                    help="do not push the dashboard to GitHub Pages")
     rn.add_argument("--notes", default="")
     rn.set_defaults(func=cmd_run)
+
+    sn = sub.add_parser(
+        "season",
+        help="run the whole season unattended: all rounds, back to back")
+    sn.add_argument("--start", default=None,
+                    help="override the first round's start date (YYYY-MM-DD)")
+    sn.add_argument("--team", action="append")
+    sn.add_argument("--poll", type=int, default=15,
+                    help="seconds between engine polls")
+    sn.add_argument("--max-ticks", type=int, default=None)
+    sn.add_argument("--equity-every", type=int, default=300)
+    sn.add_argument("--dashboard", nargs="?", const=str(DEFAULT_DASHBOARD),
+                    default=str(DEFAULT_DASHBOARD),
+                    help="write a live HTML dashboard here ('' to disable)")
+    sn.add_argument("--dashboard-refresh", type=int, default=30)
+    sn.add_argument("--no-publish", action="store_true",
+                    help="do not push the dashboard to GitHub Pages")
+    sn.add_argument("--dry-run", action="store_true",
+                    help="resolve the schedule and stop")
+    sn.add_argument("--allow-missing", action="store_true",
+                    help="run only the teams that have credentials")
+    sn.add_argument("--force", action="store_true",
+                    help="start even if account equities differ")
+    sn.add_argument("--notes", default="")
+    sn.set_defaults(func=cmd_season)
 
     sc = sub.add_parser("score", help="score recorded round results")
     sc.add_argument("--round", type=int, default=None)

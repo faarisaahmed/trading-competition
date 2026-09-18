@@ -18,6 +18,7 @@ Secrets are never logged, printed or echoed. Key ids are shown truncated.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 from collections.abc import Iterable, Sequence
@@ -77,6 +78,17 @@ class Target:
     @property
     def is_group(self) -> bool:
         return len(self.teams) > 1
+
+    def credentials(self) -> tuple[str | None, str | None]:
+        """(key_id, secret) from the environment, or (None, None) if unset."""
+        kid = os.environ.get(f"{self.env_prefix}_KEY_ID") or None
+        sec = os.environ.get(f"{self.env_prefix}_SECRET_KEY") or None
+        return kid, sec
+
+    @property
+    def noun(self) -> str:
+        """What to call this in a message: 'account' reads wrong for a team."""
+        return "account" if self.is_group else "team"
 
 
 def targets_for(cfg: CompetitionConfig, *, only: Sequence[str] | None = None) -> list[Target]:

@@ -30,6 +30,31 @@ WINDOW_END = date(2026, 9, 13)
 SEED = 4242
 
 
+@pytest.fixture(autouse=True)
+def _no_real_dotenv(monkeypatch):
+    """Keep the developer's own `.env` out of every test.
+
+    The suite must behave identically on a machine that has real Alpaca keys
+    configured and one that does not. Without this, tests that assert "fails
+    cleanly with no credentials" quietly pass on CI and fail on the maintainer's
+    laptop -- the worst possible direction for that bug to point.
+    """
+    import competition.config as config_mod
+
+    real = config_mod.load_dotenv
+
+    def guarded(path=None, **kw):
+        if path is None:
+            return {}                      # never fall back to the repo's .env
+        return real(path, **kw)
+
+    monkeypatch.setattr(config_mod, "load_dotenv", guarded)
+    monkeypatch.setattr("competition.cli.load_dotenv", guarded, raising=False)
+    for key in list(__import__("os").environ):
+        if key.startswith("ALPACA_"):
+            monkeypatch.delenv(key, raising=False)
+
+
 @pytest.fixture(scope="session")
 def cfg():
     return load_config(ROOT / "config")

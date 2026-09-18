@@ -414,6 +414,48 @@ class TeamConfig:
 
 
 @dataclass(frozen=True)
+class PublishConfig:
+    """Publishing the live dashboard to GitHub Pages."""
+
+    enabled: bool = False
+    branch: str = "gh-pages"
+    every_seconds: int = 300
+    #: Account numbers identify a real brokerage account. They are useless
+    #: without the keys, but there is no reason to put them on a public page.
+    redact_accounts: bool = True
+
+    def validate(self) -> None:
+        if self.every_seconds < 30:
+            raise ConfigError(
+                "competition.schedule.publish.every_seconds must be >= 30; "
+                "pushing to GitHub more often than that will get rate-limited"
+            )
+
+
+@dataclass(frozen=True)
+class ScheduleConfig:
+    """When the season runs, and whether it advances without a human."""
+
+    #: First round's opening day. Nudged to the next session if it is a holiday.
+    start_date: date | None = None
+    #: Trading sessions per round. Five = one market week.
+    sessions_per_round: int = 5
+    #: Sessions left idle between rounds. 0 => round 2 opens the next session
+    #: after round 1's final bell.
+    gap_sessions: int = 0
+    #: Roll into the next round automatically when one ends.
+    auto_advance: bool = True
+    publish: PublishConfig = field(default_factory=PublishConfig)
+
+    def validate(self) -> None:
+        if self.sessions_per_round < 1:
+            raise ConfigError("competition.schedule.sessions_per_round must be >= 1")
+        if self.gap_sessions < 0:
+            raise ConfigError("competition.schedule.gap_sessions must be >= 0")
+        self.publish.validate()
+
+
+@dataclass(frozen=True)
 class CompetitionConfig:
     name: str
     season: int
@@ -427,6 +469,7 @@ class CompetitionConfig:
     fairness: FairnessConfig
     data: DataConfig
     accounts: AccountsConfig
+    schedule: ScheduleConfig
     rounds: tuple[RoundConfig, ...]
     teams: tuple[TeamConfig, ...]
     source_files: tuple[Path, ...] = ()
@@ -493,6 +536,7 @@ class CompetitionConfig:
         self.accounts.validate(self.team_keys)
         for t in self.teams:
             t.validate()
+        self.schedule.validate()
         for r in self.rounds:
             r.validate(n_scored)
 
@@ -622,6 +666,40 @@ def _parse_team(raw: dict[str, Any]) -> TeamConfig:
         raise ConfigError(f"team entry missing required field {e}") from e
 
 
+def _parse_schedule(raw: Any) -> ScheduleConfig:
+    if not raw:
+        return ScheduleConfig()
+    if not isinstance(raw, dict):
+        raise ConfigError("competition.schedule must be a mapping")
+    start = raw.get("start_date")
+    if isinstance(start, str):
+        try:
+            start = date.fromisoformat(start.strip())
+        except ValueError as e:
+            raise ConfigError(
+                f"competition.schedule.start_date: {start!r} is not YYYY-MM-DD"
+            ) from e
+    elif isinstance(start, datetime):
+        start = start.date()
+    elif start is not None and not isinstance(start, date):
+        raise ConfigError("competition.schedule.start_date must be a date")
+    pub = raw.get("publish") or {}
+    if not isinstance(pub, dict):
+        raise ConfigError("competition.schedule.publish must be a mapping")
+    return ScheduleConfig(
+        start_date=start,
+        sessions_per_round=int(raw.get("sessions_per_round", 5)),
+        gap_sessions=int(raw.get("gap_sessions", 0)),
+        auto_advance=bool(raw.get("auto_advance", True)),
+        publish=PublishConfig(
+            enabled=bool(pub.get("enabled", False)),
+            branch=str(pub.get("branch", "gh-pages")),
+            every_seconds=int(pub.get("every_seconds", 300)),
+            redact_accounts=bool(pub.get("redact_accounts", True)),
+        ),
+    )
+
+
 def load_config(
     config_dir: str | Path | None = None,
     *,
@@ -653,6 +731,7 @@ def load_config(
         fairness=_sub(FairnessConfig, block.get("fairness"), where="competition.fairness"),
         data=_sub(DataConfig, block.get("data"), where="competition.data"),
         accounts=_parse_accounts(block.get("accounts")),
+        schedule=_parse_schedule(block.get("schedule")),
         rounds=tuple(_parse_round(r) for r in (comp_raw.get("rounds") or [])),
         teams=tuple(_parse_team(t) for t in (teams_raw.get("teams") or [])),
         source_files=(comp_path, teams_path),

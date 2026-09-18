@@ -116,6 +116,22 @@ competition:
     news_lookback_hours: 72
     news_limit_per_symbol: 50
 
+  # =========================================================================
+  # SCHEDULE -- when the season runs, unattended
+  # =========================================================================
+  schedule:
+    # Round 1's opening bell. If this lands on a holiday the season starts at
+    # the next session instead, so a Monday holiday costs no trading time.
+    start_date: 2026-09-21        # Monday
+    sessions_per_round: 5         # one market week: Mon -> Fri
+    gap_sessions: 0               # round N+1 opens the session after N closes
+    auto_advance: true            # roll into the next round with no human
+    publish:
+      enabled: true               # push the dashboard to GitHub Pages
+      branch: gh-pages
+      every_seconds: 300          # a push every 5 minutes while trading
+      redact_accounts: true       # never put account numbers on a public page
+
 # ===========================================================================
 # ROUNDS
 # ===========================================================================

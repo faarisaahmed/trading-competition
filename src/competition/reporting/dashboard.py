@@ -76,6 +76,9 @@ class TeamRow:
     last_trade: str = ""
     points: float = 0.0
     place: int | None = None
+    tagline: str = ""
+    philosophy: str = ""
+    prev_place: int | None = None
 
     @property
     def ret(self) -> float:
@@ -118,6 +121,11 @@ class DashboardData:
     tape: list[dict[str, Any]] = field(default_factory=list)
     standings: list[dict[str, Any]] = field(default_factory=list)
     rounds_scored: list[int] = field(default_factory=list)
+    #: Season clock, set when a schedule is in play.
+    season_phase: str = ""
+    deadline_label: str = ""
+    deadline_at: datetime | None = None
+    season_plan: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def scored(self) -> list[TeamRow]:
@@ -153,6 +161,12 @@ class DashboardData:
     @property
     def round_complete(self) -> bool:
         return bool(self.round_end and self.generated_at.date() > self.round_end)
+
+    @property
+    def has_trading(self) -> bool:
+        """Has anything actually happened? Distinguishes empty from flat."""
+        return bool(self.ticks or self.tape
+                    or any(t.fills or t.curve for t in self.teams))
 
     @property
     def is_live(self) -> bool:
@@ -271,6 +285,7 @@ def build_dashboard_data(
         positions: dict[str, float] = {}
         universe: list[str] = []
         row = TeamRow(key=team.key, name=team.name, scored=team.scored,
+                      tagline=team.tagline, philosophy=team.philosophy,
                       baseline=baseline, equity=equity, curve=curve, stamps=stamps)
         if rt is not None:
             row.baseline = float(rt.baseline_equity or cfg.starting_cash)
@@ -375,6 +390,64 @@ def _countdown(data: DashboardData) -> str:
             return f"opens in {int(secs // 86400)}d {int((secs % 86400) // 3600)}h"
         return f"opens in {int(secs // 3600)}h {int((secs % 3600) // 60):02d}m"
     return "market closed"
+
+
+def _season_clock(data: DashboardData) -> str:
+    """A countdown that ticks in the browser.
+
+    The page only regenerates every ~30s, and a clock that jumps in 30-second
+    steps reads as broken. The deadline is emitted as an ISO instant and
+    counted down client-side, so it stays smooth between renders and is
+    correct in the reader's own timezone.
+    """
+    if not data.deadline_at:
+        if data.season_phase == "done":
+            return ('<section class="clock done"><div class="clock-label">'
+                    'season complete</div></section>')
+        return ""
+    iso = data.deadline_at.isoformat()
+    phase = {
+        "before": "Round 1 starts",
+        "between": "next round starts",
+        "pre_open": "round ends",
+        "open": "round ends",
+        "after_close": "round ends",
+    }.get(data.season_phase, data.deadline_label or "next")
+    live = "live" if data.season_phase == "open" else "idle"
+    when = f"{data.deadline_at:%a %d %b %H:%M} UTC"
+    return f"""<section class="clock {live}">
+  <div class="clock-label">{_e(phase)}</div>
+  <div class="clock-value num" data-deadline="{iso}">&mdash;</div>
+  <div class="clock-when">{_e(when)}</div>
+</section>"""
+
+
+def _season_plan(data: DashboardData) -> str:
+    """The three round windows, so a visitor can see what is coming."""
+    if not data.season_plan:
+        return ""
+    rows = []
+    for w in data.season_plan:
+        state = str(w.get("state", ""))
+        badge = {"done": "done", "live": "live", "upcoming": "upcoming"}.get(state, "")
+        rows.append(
+            f"<tr class=\"{badge}\">"
+            f"<td class=\"num\">{_e(w.get('round_id'))}</td>"
+            f"<td>{_e(w.get('name'))}</td>"
+            f"<td>{_e(w.get('window'))}</td>"
+            f"<td><span class=\"pill {badge}\">{_e(state)}</span></td>"
+            f"</tr>"
+        )
+    body = "\n".join(rows)
+    return f"""<section class="panel">
+  <h2>Season schedule</h2>
+  <table class="plan">
+    <thead><tr><th>#</th><th>Round</th><th>Window</th><th>State</th></tr></thead>
+    <tbody>
+{body}
+    </tbody>
+  </table>
+</section>"""
 
 
 # --------------------------------------------------------------------------- #
@@ -568,9 +641,25 @@ def _equity_chart(data: DashboardData) -> str:
 
 
 def _banner(data: DashboardData) -> str:
-    """A standing warning whenever the numbers are not real money."""
+    """A standing warning whenever the numbers are not real money.
+
+    "Not started yet" and "simulated" are different claims and must not be
+    conflated: before the opening bell there is no data at all, and calling
+    that simulated would be its own kind of lie.
+    """
     if data.is_live:
         return ""
+    # Only the schedule can say the season has not begun. Absence of fills is
+    # not evidence of that -- a simulated run with no trades is still
+    # simulated, and must still carry the warning.
+    if data.season_phase == "before" and not data.has_trading:
+        return (
+            '<section class="banner quiet" role="status">'
+            '<strong>The competition has not started yet.</strong> '
+            'No round has been run, so every team is shown at its opening '
+            'bankroll. Trading begins at the bell shown below.'
+            '</section>'
+        )
     return (
         '<section class="banner" role="status">'
         '<strong>Simulated data \u2014 this is not a live competition.</strong> '
@@ -579,6 +668,164 @@ def _banner(data: DashboardData) -> str:
         'strategies would perform on a real tape.'
         '</section>'
     )
+
+
+def _hero(data: DashboardData) -> str:
+    """Title, live badge and the countdown -- the thing you see first."""
+    live = data.season_phase == "open"
+    badge = ('<span class="badge live"><span class="dot"></span>LIVE</span>'
+             if live else
+             f'<span class="badge">{_e(_phase_word(data))}</span>')
+    round_bit = ""
+    if data.round_id:
+        done, total = data.sessions_done, data.sessions_total or 5
+        pct = min(100.0, 100.0 * done / total) if total else 0.0
+        round_bit = (
+            f'<div class="hero-round">'
+            f'<div class="hero-round-name">Round {data.round_id} &middot; '
+            f'{_e(data.round_name)}</div>'
+            f'<div class="progress"><span style="width:{pct:.1f}%"></span></div>'
+            f'<div class="hero-round-sub">day {max(done, 1)} of {total}</div>'
+            f'</div>'
+        )
+    clock = ""
+    if data.deadline_at:
+        label = {"before": "Round 1 starts in", "between": "Next round starts in"}.get(
+            data.season_phase, "Round ends in")
+        clock = (
+            f'<div class="hero-clock">'
+            f'<div class="hero-clock-label">{_e(label)}</div>'
+            f'<div class="hero-clock-value num" '
+            f'data-deadline="{data.deadline_at.isoformat()}">&mdash;</div>'
+            f'<div class="hero-clock-when">'
+            f'{data.deadline_at:%a %d %b %H:%M} UTC</div></div>'
+        )
+    elif data.season_phase == "done":
+        clock = ('<div class="hero-clock"><div class="hero-clock-value">'
+                 'Season complete</div></div>')
+    return f"""<section class="hero">
+  <div class="hero-left">
+    <div class="hero-title">{_e(data.competition)} {badge}</div>
+    {round_bit}
+  </div>
+  {clock}
+</section>"""
+
+
+def _phase_word(data: DashboardData) -> str:
+    return {
+        "before": "not started",
+        "between": "between rounds",
+        "pre_open": "pre-market",
+        "after_close": "closed",
+        "done": "finished",
+    }.get(data.season_phase, "standby")
+
+
+_MEDALS = {1: ("gold", "1st"), 2: ("silver", "2nd"), 3: ("bronze", "3rd")}
+
+
+def _podium(data: DashboardData) -> str:
+    """Top three, sized by placing. The centrepiece of the leaderboard."""
+    ranked = data.ranked
+    if not data.has_trading or len(ranked) < 3:
+        return ""
+    first, second, third = ranked[0], ranked[1], ranked[2]
+    # Visual order is 2nd, 1st, 3rd -- the winner in the middle and tallest.
+    steps = []
+    for row, height in ((second, "h2"), (first, "h1"), (third, "h3")):
+        cls, label = _MEDALS[row.place]
+        steps.append(
+            f'<div class="step {height}">'
+            f'<div class="step-team">'
+            f'<span class="swatch" style="background:{team_var(row.key)}"></span>'
+            f'<span class="step-name">{_e(row.name)}</span></div>'
+            f'<div class="step-ret {_delta_class(row.ret)}">'
+            f'{_pct(row.ret * 100)}</div>'
+            f'<div class="step-eq">{_money(row.equity)}</div>'
+            f'<div class="block {cls}"><span class="place">{label}</span></div>'
+            f'</div>'
+        )
+    return ('<section class="podium">' + "".join(steps) + '</section>')
+
+
+def _race(data: DashboardData) -> str:
+    """Every team as a bar, longest return wins. Reads at a glance."""
+    ranked = data.ranked
+    bench = data.benchmark
+    rows = list(ranked) + ([bench] if bench else [])
+    if not rows:
+        return ""
+    span = max((abs(r.ret) for r in rows), default=0.0) or 0.01
+    out = []
+    for row in rows:
+        frac = min(abs(row.ret) / span, 1.0) * 50.0
+        side = "pos" if row.ret >= 0 else "neg"
+        medal = ""
+        if row.scored and row.place in _MEDALS and data.has_trading:
+            medal = f'<span class="medal {_MEDALS[row.place][0]}"></span>'
+        place = (str(row.place) if row.scored and data.has_trading else "&mdash;")
+        out.append(
+            f'<div class="race-row">'
+            f'<div class="race-place num">{place}</div>'
+            f'<div class="race-name">{medal}'
+            f'<span class="swatch" style="background:{team_var(row.key)}"></span>'
+            f'{_e(row.name)}'
+            f'</div>'
+            f'<div class="race-track">'
+            f'<div class="race-bar {side}" style="width:{frac:.2f}%"></div>'
+            f'</div>'
+            f'<div class="race-ret num {_delta_class(row.ret)}">'
+            f'{_pct(row.ret * 100)}</div>'
+            f'<div class="race-eq num">{_money(row.equity)}</div>'
+            f'</div>'
+        )
+    return ('<div class="race"><div class="race-axis"><span>behind</span>'
+            '<span>ahead</span></div>' + "".join(out) + '</div>')
+
+
+def _tab_bar(tabs: list[tuple[str, str]]) -> str:
+    buttons = "".join(
+        f'<button class="tab{" on" if i == 0 else ""}" data-tab="{tid}">'
+        f'{_e(label)}</button>'
+        for i, (tid, label) in enumerate(tabs)
+    )
+    return f'<nav class="tabs" role="tablist">{buttons}</nav>'
+
+
+def _team_dossiers(data: DashboardData) -> str:
+    """Who each competitor is, in its own words."""
+    cards = []
+    for row in (data.ranked + ([data.benchmark] if data.benchmark else [])):
+        pos = ", ".join(f"{k} {v:g}" for k, v in sorted(row.positions.items())[:6])
+        uni = ", ".join(row.universe[:8]) or "&mdash;"
+        rank = (f'<span class="dossier-rank">#{row.place}</span>'
+                if row.scored and row.place and data.has_trading else "")
+        cards.append(f"""<article class="dossier">
+  <header>
+    <span class="swatch" style="background:{team_var(row.key)}"></span>
+    <h3>{_e(row.name)}</h3>{rank}
+    <span class="dossier-ret {_delta_class(row.ret)}">{_pct(row.ret * 100)}</span>
+  </header>
+  <p class="tagline">&ldquo;{_e(row.tagline)}&rdquo;</p>
+  <p class="philosophy">{_e(row.philosophy)}</p>
+  <dl class="dossier-stats">
+    <div><dt>Equity</dt><dd class="num">{_money(row.equity)}</dd></div>
+    <div><dt>P&amp;L</dt><dd class="num {_delta_class(row.pnl)}">
+      {_signed(row.pnl)}</dd></div>
+    <div><dt>Fills</dt><dd class="num">{row.fills}</dd></div>
+    <div><dt>Traded</dt><dd class="num">{_money(row.traded)}</dd></div>
+    <div><dt>Max DD</dt><dd class="num">{_pct(row.max_drawdown * 100)}</dd></div>
+    <div><dt>Season pts</dt><dd class="num">{row.points:g}</dd></div>
+  </dl>
+  <div class="dossier-holdings">
+    <span>Holding</span> {_e(pos) or "flat"}
+  </div>
+  <div class="dossier-holdings">
+    <span>Universe</span> {uni}
+  </div>
+</article>""")
+    return '<div class="dossiers">' + "".join(cards) + "</div>"
 
 
 def _stat_tiles(data: DashboardData) -> str:
@@ -601,7 +848,7 @@ def _stat_tiles(data: DashboardData) -> str:
         f'{status}</div>'
         f'<div class="tile-sub">{_e(_countdown(data))}</div></div>'
     )
-    if leader:
+    if leader and data.has_trading:
         tiles.append(
             f'<div class="tile"><div class="tile-label">Leading</div>'
             f'<div class="tile-value">{_e(leader.name)}</div>'
@@ -786,6 +1033,64 @@ def _season_table(data: DashboardData) -> str:
 # --------------------------------------------------------------------------- #
 
 _SCRIPT = """
+(function () {
+  // Tabs. Plain buttons toggling panels: no router, no history entries, and
+  // the whole page still works if this script never runs (all panels would
+  // simply be visible).
+  var tabs = document.querySelectorAll('.tab');
+  function show(id) {
+    document.querySelectorAll('.panel-set').forEach(function (p) {
+      p.classList.toggle('hidden', p.id !== 'tab-' + id);
+    });
+    tabs.forEach(function (t) {
+      t.classList.toggle('on', t.getAttribute('data-tab') === id);
+    });
+    try { localStorage.setItem('comp-tab', id); } catch (e) { /* private mode */ }
+  }
+  tabs.forEach(function (t) {
+    t.addEventListener('click', function () { show(t.getAttribute('data-tab')); });
+  });
+  // Survive the 30-second auto-refresh on whichever tab the visitor chose.
+  try {
+    var saved = localStorage.getItem('comp-tab');
+    if (saved && document.getElementById('tab-' + saved)) show(saved);
+  } catch (e) { /* ignore */ }
+})();
+
+(function () {
+  // Grow the race bars from zero on load, so a refresh feels like movement
+  // rather than a redraw.
+  window.requestAnimationFrame(function () {
+    document.querySelectorAll('.race-bar').forEach(function (b) {
+      var w = b.style.width;
+      b.style.width = '0%';
+      window.requestAnimationFrame(function () { b.style.width = w; });
+    });
+  });
+})();
+
+(function () {
+  // The season countdown. Ticks locally so it stays smooth between the
+  // page's periodic regenerations.
+  var el = document.querySelector('[data-deadline]');
+  if (!el) return;
+  var target = new Date(el.getAttribute('data-deadline')).getTime();
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function tick() {
+    var left = Math.max(0, Math.floor((target - Date.now()) / 1000));
+    var d = Math.floor(left / 86400);
+    var h = Math.floor((left % 86400) / 3600);
+    var m = Math.floor((left % 3600) / 60);
+    var s = left % 60;
+    el.textContent = d > 0
+      ? d + 'd ' + pad(h) + ':' + pad(m) + ':' + pad(s)
+      : pad(h) + ':' + pad(m) + ':' + pad(s);
+    if (left === 0) { el.textContent = '00:00:00'; return; }
+    setTimeout(tick, 1000);
+  }
+  tick();
+})();
+
 (function () {
   var node = document.getElementById('chart-data');
   if (!node) return;
@@ -980,6 +1285,245 @@ def _styles(slots: Mapping[str, int]) -> str:
   .empty {{ color: var(--muted); padding: 34px 0; text-align: center; }}
   footer {{ color: var(--muted); font-size: 11.5px; margin-top: 22px;
             display: flex; gap: 16px; flex-wrap: wrap; }}
+
+  .banner.quiet {{ border-color: var(--border); }}
+
+  /* ---- hero ---------------------------------------------------------- */
+  .hero {{
+    display: flex; justify-content: space-between; align-items: center;
+    gap: 24px; flex-wrap: wrap; padding: 20px 24px; margin-bottom: 16px;
+    border-radius: 14px; border: 1px solid var(--border);
+    background: linear-gradient(135deg, var(--surface), var(--plane));
+  }}
+  .hero-title {{
+    font-size: 26px; font-weight: 700; letter-spacing: -.01em;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  }}
+  .badge {{
+    font-size: 11px; font-weight: 600; letter-spacing: .1em;
+    text-transform: uppercase; padding: 4px 10px; border-radius: 999px;
+    border: 1px solid var(--border); color: var(--text-secondary);
+  }}
+  .badge.live {{
+    border-color: var(--good); color: var(--good);
+    display: inline-flex; align-items: center; gap: 7px;
+  }}
+  .badge .dot {{
+    width: 7px; height: 7px; border-radius: 50%; background: var(--good);
+    animation: pulse 1.8s ease-in-out infinite;
+  }}
+  @keyframes pulse {{
+    0%, 100% {{ opacity: 1; transform: scale(1); }}
+    50% {{ opacity: .35; transform: scale(.78); }}
+  }}
+  .hero-round {{ margin-top: 12px; max-width: 420px; }}
+  .hero-round-name {{ font-size: 13px; color: var(--text-secondary); }}
+  .hero-round-sub {{ font-size: 11px; color: var(--muted); margin-top: 5px; }}
+  .progress {{
+    height: 6px; border-radius: 99px; background: var(--grid);
+    margin-top: 8px; overflow: hidden;
+  }}
+  .progress span {{
+    display: block; height: 100%; border-radius: 99px;
+    background: var(--good); transition: width .8s ease;
+  }}
+  .hero-clock {{ text-align: right; }}
+  .hero-clock-label {{
+    font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--text-secondary);
+  }}
+  .hero-clock-value {{
+    font-size: 42px; font-weight: 700; line-height: 1.1;
+    font-variant-numeric: tabular-nums; color: var(--text-primary);
+  }}
+  .hero-clock-when {{ font-size: 11px; color: var(--muted); }}
+
+  /* ---- tabs ---------------------------------------------------------- */
+  .tabs {{
+    display: flex; gap: 4px; margin-bottom: 18px; flex-wrap: wrap;
+    border-bottom: 1px solid var(--border);
+  }}
+  .tab {{
+    appearance: none; background: none; border: 0; cursor: pointer;
+    font: inherit; font-size: 13px; font-weight: 600; letter-spacing: .01em;
+    color: var(--text-secondary); padding: 10px 16px;
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }}
+  .tab:hover {{ color: var(--text-primary); }}
+  .tab.on {{ color: var(--text-primary); border-bottom-color: var(--good); }}
+  .panel-set.hidden {{ display: none; }}
+
+  /* ---- podium -------------------------------------------------------- */
+  .podium {{
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+    align-items: end; margin-bottom: 18px;
+  }}
+  .step {{ text-align: center; }}
+  .step-team {{
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    font-weight: 600; font-size: 15px;
+  }}
+  .step-ret {{
+    font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums;
+    margin: 2px 0;
+  }}
+  .step-eq {{
+    font-size: 12px; color: var(--muted); margin-bottom: 8px;
+    font-variant-numeric: tabular-nums;
+  }}
+  .block {{
+    border-radius: 10px 10px 0 0; display: flex; align-items: flex-start;
+    justify-content: center; padding-top: 10px;
+    border: 1px solid var(--border); border-bottom: 0;
+    width: min(100%, 230px); margin: 0 auto;
+  }}
+  .h1 .block {{ height: 104px; }}
+  .h2 .block {{ height: 74px; }}
+  .h3 .block {{ height: 54px; }}
+  .block .place {{
+    font-size: 12px; font-weight: 700; letter-spacing: .09em;
+    text-transform: uppercase; color: #12151a;
+  }}
+  .block.gold {{ background: #e8b53a; border-color: #e8b53a; }}
+  .block.silver {{ background: #b9c0c9; border-color: #b9c0c9; }}
+  .block.bronze {{ background: #c98a5e; border-color: #c98a5e; }}
+
+  /* ---- the race ------------------------------------------------------ */
+  .race {{ display: flex; flex-direction: column; gap: 3px; }}
+  .race-axis {{
+    display: flex; justify-content: space-between; font-size: 10px;
+    letter-spacing: .09em; text-transform: uppercase; color: var(--muted);
+    padding: 0 0 6px;
+  }}
+  .race-row {{
+    display: grid; align-items: center; gap: 12px;
+    grid-template-columns: 26px minmax(150px, 210px) 1fr 78px 96px;
+    padding: 5px 0; border-bottom: 1px solid var(--grid);
+  }}
+  .race-place {{ color: var(--muted); font-size: 12px; text-align: right; }}
+  .race-name {{
+    display: flex; align-items: center; gap: 8px; font-weight: 600;
+    font-size: 13px; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis;
+  }}
+  .race-name em {{
+    color: var(--muted); font-weight: 400; font-size: 10px;
+    letter-spacing: .06em; text-transform: uppercase; margin-left: 2px;
+  }}
+  .race-track {{
+    position: relative; height: 16px; background: var(--grid);
+    border-radius: 4px;
+  }}
+  /* Zero sits in the middle: bars grow right for gains, left for losses. */
+  .race-track::before {{
+    content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px;
+    width: 1px; background: var(--axis);
+  }}
+  .race-bar {{
+    position: absolute; top: 0; height: 100%; border-radius: 4px;
+    transition: width .9s cubic-bezier(.22, 1, .36, 1);
+  }}
+  .race-bar.pos {{ left: 50%; background: var(--up); }}
+  .race-bar.neg {{ right: 50%; background: var(--down); }}
+  .race-ret, .race-eq {{ text-align: right; font-size: 13px; }}
+  .race-eq {{ color: var(--text-secondary); }}
+  .medal {{
+    width: 9px; height: 9px; border-radius: 50%; display: inline-block;
+    flex: 0 0 auto;
+  }}
+  .medal.gold {{ background: #e8b53a; }}
+  .medal.silver {{ background: #b9c0c9; }}
+  .medal.bronze {{ background: #c98a5e; }}
+
+  /* ---- dossiers ------------------------------------------------------ */
+  .dossiers {{
+    display: grid; gap: 14px;
+    grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  }}
+  .dossier {{
+    border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px;
+    background: var(--surface);
+  }}
+  .dossier header {{
+    display: flex; align-items: center; gap: 9px; margin-bottom: 10px;
+  }}
+  .dossier h3 {{ margin: 0; font-size: 15px; }}
+  .dossier-rank {{
+    font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums;
+  }}
+  .dossier-ret {{
+    margin-left: auto; font-size: 17px; font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }}
+  .tagline {{
+    margin: 0 0 8px; font-style: italic; font-size: 13px;
+    color: var(--text-primary);
+  }}
+  .philosophy {{
+    margin: 0 0 12px; font-size: 12px; line-height: 1.55;
+    color: var(--text-secondary);
+  }}
+  .dossier-stats {{
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px;
+    margin: 0 0 10px;
+  }}
+  .dossier-stats dt {{
+    font-size: 10px; letter-spacing: .07em; text-transform: uppercase;
+    color: var(--muted);
+  }}
+  .dossier-stats dd {{ margin: 2px 0 0; font-size: 13px; font-weight: 600; }}
+  .dossier-holdings {{
+    font-size: 11px; color: var(--text-secondary); padding-top: 7px;
+    border-top: 1px solid var(--grid);
+  }}
+  .dossier-holdings span {{
+    color: var(--muted); text-transform: uppercase; letter-spacing: .07em;
+    margin-right: 6px; font-size: 10px;
+  }}
+
+  @media (prefers-reduced-motion: reduce) {{
+    .race-bar, .progress span {{ transition: none; }}
+    .badge .dot {{ animation: none; }}
+  }}
+
+  @media (max-width: 720px) {{
+    .race-row {{ grid-template-columns: 22px 1fr 70px; }}
+    .race-track, .race-eq {{ display: none; }}
+    .hero-clock {{ text-align: left; }}
+    .hero-clock-value {{ font-size: 32px; }}
+  }}
+  .clock {{
+    display: flex; align-items: baseline; gap: 20px; flex-wrap: wrap;
+    padding: 14px 18px; margin: 0 0 18px; border-radius: 10px;
+    background: var(--surface); border: 1px solid var(--border);
+  }}
+  .clock.live {{ border-color: var(--good); }}
+  .clock-label {{
+    font-size: 11px; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--text-secondary);
+  }}
+  .clock-value {{
+    font-size: 30px; font-weight: 600; font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+  }}
+  .clock.live .clock-value {{ color: var(--good); }}
+  .clock-when {{ font-size: 12px; color: var(--muted); }}
+  .clock.done .clock-label {{ color: var(--text-primary); font-size: 16px; }}
+  table.plan {{ width: 100%; border-collapse: collapse; }}
+  table.plan th {{
+    text-align: left; font-size: 11px; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--text-secondary);
+    padding: 6px 10px; border-bottom: 1px solid var(--border);
+  }}
+  table.plan td {{ padding: 8px 10px; border-bottom: 1px solid var(--grid); }}
+  table.plan tr.done td {{ color: var(--muted); }}
+  .pill {{
+    display: inline-block; padding: 2px 9px; border-radius: 999px;
+    font-size: 11px; letter-spacing: .04em; border: 1px solid var(--border);
+    color: var(--text-secondary);
+  }}
+  .pill.live {{ border-color: var(--good); color: var(--good); }}
+  .pill.done {{ color: var(--muted); }}
 """
 
 
@@ -1003,8 +1547,6 @@ def render_dashboard(cfg: CompetitionConfig, data: DashboardData, *,
                    if refresh > 0 else "")
     # Exposed on <body> so the palette validator can be pointed at the page.
     palette_attr = ",".join(CATEGORICAL_LIGHT)
-    resumed_note = " &middot; <strong>resumed</strong>" if data.resumed else ""
-    round_name_part = f" &mdash; {_e(data.round_name)}" if data.round_name else ""
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -1016,33 +1558,49 @@ def render_dashboard(cfg: CompetitionConfig, data: DashboardData, *,
 <style>{_styles(slots)}</style>
 </head>
 <body class="viz-root" data-palette="{palette_attr}">
-<header class="top">
-  <div>
-    <h1>{_e(title)}{round_name_part}</h1>
-    <div class="sub">{_e(round_line)}</div>
-  </div>
-  <div class="sub num">
-    updated {data.generated_at:%Y-%m-%d %H:%M:%S} UTC{resumed_note}
-  </div>
-</header>
 
+{_hero(data)}
 {_banner(data)}
-{_stat_tiles(data)}
 
-<section class="panel">
-  <h2>Equity this round</h2>
-  {_equity_chart(data)}
+{_tab_bar([
+    ("leaderboard", "Leaderboard"),
+    ("teams", "The Field"),
+    ("season", "Season"),
+    ("activity", "Activity"),
+])}
+
+<section class="panel-set" id="tab-leaderboard">
+  {_podium(data)}
+  {_stat_tiles(data)}
+  <section class="panel">
+    <h2>Standings{_e(round_line and " — " + round_line)}</h2>
+    {_race(data)}
+  </section>
+  <section class="panel">
+    <h2>Equity this round</h2>
+    {_equity_chart(data)}
+  </section>
+  {_standings_table(data)}
 </section>
 
-{_standings_table(data)}
-{_team_cards(data)}
-{_season_table(data)}
-{_tape(data)}
+<section class="panel-set hidden" id="tab-teams">
+  {_team_dossiers(data)}
+</section>
+
+<section class="panel-set hidden" id="tab-season">
+  {_season_plan(data)}
+  {_season_table(data)}
+</section>
+
+<section class="panel-set hidden" id="tab-activity">
+  {_tape(data)}
+</section>
 
 <footer>
   <span>data: {_e(data.data_source)}</span>
   <span>rules: {_e(data.rules_hash)}</span>
   <span>bankroll: {_money(cfg.starting_cash)} per team per round</span>
+  <span>updated {data.generated_at:%H:%M:%S} UTC</span>
   <span>auto-refresh: {refresh}s</span>
 </footer>
 <script>{_SCRIPT}</script>
