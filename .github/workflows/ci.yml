@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check src tests scripts
+
+      - name: Test
+        run: pytest -q --cov=competition --cov-report=term-missing
+
+      # The whole competition must run with no credentials and no network.
+      - name: Validate the rulebook and the field
+        run: comp doctor
+
+      - name: Prove the Round 3 draft is fair
+        run: |
+          comp draft --round 3 --write
+          comp verify-draft --round 3
+
+      - name: Dry-run all three rounds
+        run: |
+          comp backtest --round 1 --start 2026-09-08 --end 2026-09-10 \
+            --source synthetic --seed 5 --tick-seconds 300 \
+            --daily-history 150 --warmup-sessions 25
+          comp backtest --round 2 --start 2026-09-08 --end 2026-09-10 \
+            --source synthetic --seed 5 --pool-size 20 --tick-seconds 300 \
+            --daily-history 150 --warmup-sessions 25
+          comp backtest --round 3 --start 2026-09-08 --end 2026-09-10 \
+            --source synthetic --seed 5 --tick-seconds 300 \
+            --daily-history 150 --warmup-sessions 25
+          comp leaderboard
+
+      - name: Confirm the pool can supply the draft
+        run: comp universe --size 500 > /dev/null
+
+      - name: Status and dashboard render
+        run: |
+          comp status
+          comp dashboard --refresh 0 --out /tmp/dashboard.html
+          test -s /tmp/dashboard.html
+          grep -q "Standings" /tmp/dashboard.html
+          # The dashboard must be self-contained: no network at view time.
+          ! grep -qE '(src|href)="https?://' /tmp/dashboard.html
