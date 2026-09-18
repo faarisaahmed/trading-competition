@@ -148,12 +148,25 @@ comp leaderboard
 ### Going live
 
 You need **one Alpaca paper account per team** — nine of them, so each trades
-its own portfolio.
+its own portfolio. Alpaca caps paper accounts at **3 per login**, so that is
+**3 sign-ups**, not 9. (Bonus: data rate limits are per *owner*, so spreading
+nine accounts over three logins triples your request headroom.)
 
-1. Create the accounts at [app.alpaca.markets](https://app.alpaca.markets) and
-   generate a key pair for each.
-2. `cp .env.example .env` and paste them in.
-3. Verify everything, including that all nine accounts hold the same balance:
+1. Three sign-ups at [app.alpaca.markets](https://app.alpaca.markets); under
+   each, *Open New Paper Account* ×3. Set the same starting balance on all
+   nine — $5,000 matches the rulebook, but $100k works too (strategies size by
+   weight of equity, and order caps scale with the bankroll).
+2. Generate a key pair per account, paste them into a scratch file one per
+   line, and let the tool do the rest:
+
+   ```bash
+   comp setup-accounts --from-file keys.txt
+   ```
+
+   It assigns pairs to teams, verifies every one against Alpaca, refuses any
+   **live** account, warns on unequal balances, and writes `.env` at mode
+   `0600`. Secrets are never printed. Then delete the scratch file.
+3. Pre-flight:
 
    ```bash
    comp doctor --check-accounts
@@ -161,6 +174,9 @@ its own portfolio.
 
    This **refuses to proceed** if the accounts differ by more than 1% of the
    bankroll. Unequal starting money is the one thing that invalidates a round.
+
+Full walkthrough, including the one-account alternative:
+[docs/accounts.md](docs/accounts.md).
 
 4. Pre-train the RL entry once, before Round 1 (this is the coding stage, so it
    is allowed — and it is what makes an RL entry viable over three weeks):
@@ -271,6 +287,7 @@ tests, including 72 that do nothing but attack the draft.
 
 | | |
 |---|---|
+| `comp setup-accounts [--from-file f]` | parse, verify and write the teams' Alpaca keys |
 | `comp doctor [--check-accounts]` | validate config, credentials, accounts, pool freshness |
 | `comp teams [--team KEY]` | describe the field, with every parameter |
 | `comp universe [--live]` | audit the Round 3 ranked pool |

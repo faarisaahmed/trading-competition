@@ -54,7 +54,7 @@ def account():
 
 @pytest.fixture
 def rails(cfg):
-    return Guardrails(cfg.risk)
+    return Guardrails(cfg.risk, bankroll=cfg.starting_cash)
 
 
 @pytest.fixture
@@ -206,7 +206,8 @@ def test_resting_limit_sells_do_not_fund_buys(rails, state, snap):
 
 
 def test_position_cap(rails, state, snap, cfg):
-    tight = Guardrails(type(cfg.risk)(**{**cfg.risk.__dict__, "max_position_pct": 0.50}))
+    tight = Guardrails(type(cfg.risk)(**{**cfg.risk.__dict__, "max_position_pct": 0.50}),
+                       bankroll=cfg.starting_cash)
     account = Account(cash=3000.0, equity=5000.0, buying_power=3000.0,
                       positions=(Position("AAPL", 24, 100.0, 100.0),))
     r = tight.validate([OrderIntent("AAPL", "buy", notional=1000)], state=state,
@@ -334,7 +335,7 @@ def test_closed_market_blocks_everything(rails, state, account, cal):
 
 
 def test_untradable_assets_are_refused(state, account, snap, cfg):
-    rails = Guardrails(cfg.risk, is_tradable=lambda s: s != "MSFT")
+    rails = Guardrails(cfg.risk, bankroll=cfg.starting_cash, is_tradable=lambda s: s != "MSFT")
     r = check(rails, state, account, snap, [OrderIntent("MSFT", "buy", notional=100)])
     assert only_reason(r) is RejectReason.ASSET_NOT_TRADABLE
 

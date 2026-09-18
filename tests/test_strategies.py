@@ -116,7 +116,7 @@ def test_strategy_runs_a_full_session_without_error(cfg, key, feed, symbols, cal
     account = Account(cash=cfg.starting_cash, equity=cfg.starting_cash,
                       buying_power=cfg.starting_cash, positions=())
     state: dict = {}
-    rails = Guardrails(cfg.risk)
+    rails = Guardrails(cfg.risk, bankroll=cfg.starting_cash)
     risk = RiskState(key)
     stamps = calendar.tick_times(date(2026, 9, 8), date(2026, 9, 9),
                                  seconds=max(strat.tick_seconds, 300))

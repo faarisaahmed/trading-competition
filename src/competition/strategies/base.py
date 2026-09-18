@@ -341,7 +341,13 @@ class StrategyContext:
         return max(self.risk.min_order_notional, 1.0)
 
     def max_notional(self) -> float:
-        return min(self.risk.max_order_notional, self.risk.max_position_pct * self.equity)
+        # Scale with the bankroll the team was actually given, not a hard-coded
+        # dollar figure -- see RiskConfig.max_order_notional_x_bankroll.
+        bankroll = self.baseline_equity or self.starting_cash
+        return min(
+            self.risk.max_order_notional(bankroll),
+            self.risk.max_position_pct * self.equity,
+        )
 
     def _shares_for(self, symbol: str, notional: float, price: float) -> float:
         """Notional -> share count, honouring whole-share-only symbols."""

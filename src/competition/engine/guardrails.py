@@ -116,11 +116,16 @@ class Guardrails:
         self,
         risk: RiskConfig,
         *,
+        bankroll: float,
         is_tradable: Callable[[str], bool] | None = None,
         is_fractionable: Callable[[str], bool] | None = None,
         allow_closed_market: bool = False,
     ):
         self.risk = risk
+        #: The round's per-team bankroll. Order-size limits scale with it, so
+        #: the same rulebook works whether an account was created with $5,000
+        #: or Alpaca's default $100,000.
+        self.bankroll = float(bankroll)
         self._is_tradable = is_tradable or (lambda _s: True)
         self._is_fractionable = is_fractionable or (lambda _s: True)
         self.allow_closed_market = allow_closed_market
@@ -322,9 +327,10 @@ class Guardrails:
             if notional < self.risk.min_order_notional and not closing_out:
                 reject(intent, RejectReason.MIN_NOTIONAL, f"${notional:.2f}")
                 continue
-            if notional > self.risk.max_order_notional + 1e-6:
+            order_ceiling = self.risk.max_order_notional(self.bankroll)
+            if notional > order_ceiling + 1e-6:
                 reject(intent, RejectReason.MAX_NOTIONAL,
-                       f"${notional:.2f} > ${self.risk.max_order_notional:.2f}")
+                       f"${notional:.2f} > ${order_ceiling:.2f}")
                 continue
 
             # -- 12/13. buying power, position and leverage caps ---------- #

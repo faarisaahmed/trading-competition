@@ -241,6 +241,7 @@ class CompetitionEngine:
         self.equity_snapshot_seconds = equity_snapshot_seconds
         self.guardrails = Guardrails(
             cfg.risk,
+            bankroll=cfg.starting_cash,
             is_tradable=is_tradable,
             is_fractionable=is_fractionable,
             allow_closed_market=allow_closed_market,

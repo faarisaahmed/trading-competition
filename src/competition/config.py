@@ -76,7 +76,12 @@ class RiskConfig:
     max_gross_leverage: float = 1.0
     max_position_pct: float = 1.0
     min_order_notional: float = 1.0
-    max_order_notional: float = 5000.0
+    #: Cap on a single order, as a multiple of the round's bankroll. Relative
+    #: rather than absolute because a paper account's balance is whatever the
+    #: dashboard created it with -- Alpaca's default is $100k. An absolute
+    #: $5,000 cap on a $100k account would silently limit every order to 5% of
+    #: equity and make the whole competition unrunnable at any other bankroll.
+    max_order_notional_x_bankroll: float = 1.0
     max_orders_per_tick: int = 12
     max_orders_per_day: int = 2000
     daily_loss_kill_switch_pct: float = 0.35
@@ -90,12 +95,25 @@ class RiskConfig:
             raise ConfigError("risk.max_gross_leverage must be in (0, 4]")
         if not 0 < self.max_position_pct <= 1.0 * self.max_gross_leverage:
             raise ConfigError("risk.max_position_pct must be in (0, max_gross_leverage]")
-        if self.min_order_notional <= 0 or self.max_order_notional <= self.min_order_notional:
-            raise ConfigError("risk order notional bounds are inconsistent")
+        if self.min_order_notional <= 0:
+            raise ConfigError("risk.min_order_notional must be > 0")
+        if not 0 < self.max_order_notional_x_bankroll <= 10:
+            raise ConfigError(
+                "risk.max_order_notional_x_bankroll must be in (0, 10]"
+            )
         if not 0 < self.daily_loss_kill_switch_pct < 1:
             raise ConfigError("risk.daily_loss_kill_switch_pct must be in (0, 1)")
         if self.max_orders_per_tick < 1:
             raise ConfigError("risk.max_orders_per_tick must be >= 1")
+
+    def max_order_notional(self, bankroll: float) -> float:
+        """Largest single order allowed, for a given bankroll.
+
+        Relative rather than absolute so the same rulebook works whether a
+        paper account was created with $5,000 or Alpaca's default $100,000.
+        """
+        return max(self.max_order_notional_x_bankroll * bankroll,
+                   self.min_order_notional)
 
 
 @dataclass(frozen=True)

@@ -5,9 +5,13 @@
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-cp .env.example .env          # then paste in nine key pairs
+comp setup-accounts --from-file keys.txt   # see docs/accounts.md
 comp doctor --check-accounts
 ```
+
+Getting the nine accounts is three Alpaca sign-ups, not nine — the dashboard
+caps paper accounts at 3 per login. [docs/accounts.md](accounts.md) walks
+through it.
 
 `doctor` is the gate. It must show no `ERROR` lines before you run anything
 live. In particular it fails if:
@@ -18,10 +22,18 @@ live. In particular it fails if:
 
 ### Equalising the accounts
 
-Alpaca paper balances cannot be set over the API. In the Alpaca dashboard, use
-**Reset Account** on each paper account and set the starting balance to the
-same value for all nine. `$5,000` matches the rulebook exactly; any equal value
-works, since round return is measured per account from its own baseline.
+Alpaca paper balances cannot be set over the API. Set the starting balance when
+you *create* each paper account in the dashboard (the default is $100,000 and
+it cannot be changed afterwards without a reset).
+
+`$5,000` matches the rulebook exactly. Any equal value works: every strategy
+sizes by weight of equity, and the order-size cap is a multiple of the bankroll
+rather than a fixed dollar figure — just set `competition.starting_cash` to
+match so the reports read correctly.
+
+What matters is that all nine are **identical**. `comp setup-accounts` and
+`comp doctor --check-accounts` both refuse to proceed when they differ by more
+than 1%.
 
 ### Pre-train the RL entry
 

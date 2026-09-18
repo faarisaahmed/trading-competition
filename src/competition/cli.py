@@ -33,11 +33,26 @@ from .config import REPO_ROOT, CompetitionConfig, ConfigError, load_config, load
 from .data.calendar import MarketCalendar
 from .data.feed import AlpacaFeed, ReplayFeed
 from .data.universe import UniverseProvider, UniverseSnapshot
-from .draft import DraftError, verify
+from .draft import DraftError
+from .draft import verify as verify_draft
 from .engine import CompetitionEngine, Ledger, UniverseResolver
 from .engine.checkpoint import load_round_checkpoint
 from .pickers import load_picker
 from .scoring import build_leaderboard, score_round
+from .setup import (
+    Pair,
+    SetupError,
+    assign,
+    parse_pairs,
+    render_env,
+    report,
+    write_env,
+)
+
+# Both modules export a `verify`: one re-checks a dealt draft, the other
+# checks Alpaca credentials. Imported unaliased, the second silently shadows
+# the first and `comp draft` calls the wrong function.
+from .setup import verify as verify_credentials
 from .strategies import load_strategy
 from .types import UTC, Bar, utcnow
 
@@ -436,7 +451,7 @@ def cmd_draft(args, cfg: CompetitionConfig) -> int:
             h.sector_counts().items(), key=lambda kv: -kv[1]))
         _print(f"  {h.team_key:<14} deciles {sorted(h.deciles(result.pool_size))} | {sectors}")
 
-    problems = verify(
+    problems = verify_draft(
         result, provider.snapshot(metric=rnd.draft.metric).head(result.pool_size),
         min_rank_deciles=rnd.draft.min_rank_deciles,
         max_sector_share=rnd.draft.max_sector_share,
@@ -989,6 +1004,125 @@ def cmd_run(args, cfg: CompetitionConfig) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# account setup
+# --------------------------------------------------------------------------- #
+
+
+def cmd_setup_accounts(args, cfg: CompetitionConfig) -> int:
+    """Parse, verify and write the nine key pairs."""
+    env_path = Path(args.env_out)
+    teams = _teams_for(cfg, args.team)
+
+    if args.verify:
+        load_dotenv(args.env_file, override=True)
+        bound = []
+        for team in teams:
+            kid, sec = team.credentials()
+            if not (kid and sec):
+                _print(f"  ----  {team.key:<14} no keys in the environment")
+                continue
+            bound.append((team, Pair(kid, sec)))
+        if not bound:
+            _print("Nothing to verify: no team has credentials set. Run "
+                   "`comp setup-accounts` first.")
+            return 1
+        _print(f"Verifying {len(bound)} credential pair(s) against Alpaca…\n")
+        results = verify_credentials(bound)
+        lines, problems = report(results, bankroll=cfg.starting_cash)
+        for line in lines:
+            _print(line)
+        for problem in problems:
+            _print(f"\n  ERROR {problem}")
+        return 1 if problems else 0
+
+    # ---- gather the pairs ------------------------------------------------ #
+    try:
+        if args.from_file:
+            text = (sys.stdin.read() if args.from_file == "-"
+                    else Path(args.from_file).read_text())
+            pairs = parse_pairs(text)
+            _print(f"Parsed {len(pairs)} credential pair(s).")
+        else:
+            pairs = _prompt_for_pairs(teams)
+        if not pairs:
+            _print("No credentials given; nothing written.")
+            return 1
+        bound = assign(cfg, pairs, only=[t.key for t in teams])
+    except SetupError as e:
+        _print(f"ERROR: {e}")
+        return 2
+    except OSError as e:
+        _print(f"ERROR: cannot read {args.from_file}: {e}")
+        return 2
+
+    missing = [t.key for t in teams if t.key not in {b[0].key for b in bound}]
+    if missing:
+        _print(f"\n  {len(missing)} team(s) have no credentials: "
+               f"{', '.join(missing)}")
+        if not args.allow_missing:
+            _print("  Pass --allow-missing to write a partial .env anyway, or "
+                   "supply the remaining pairs.")
+            return 1
+
+    # ---- verify before writing ------------------------------------------ #
+    _print(f"\nVerifying {len(bound)} pair(s) against Alpaca…\n")
+    results = verify_credentials(bound)
+    lines, problems = report(results, bankroll=cfg.starting_cash)
+    for line in lines:
+        _print(line)
+
+    if problems and not args.force:
+        _print("")
+        for problem in problems:
+            _print(f"  ERROR {problem}")
+        _print("\nNothing written. Fix the above, or pass --force to write "
+               "anyway (not recommended).")
+        return 1
+
+    body = render_env(
+        results,
+        data_from=args.data_from,
+        feed=cfg.data.feed,
+    )
+    if args.dry_run:
+        _print(f"\n--dry-run: would write {len(results)} team(s) to {env_path}. "
+               f"Secrets not shown.")
+        return 0
+
+    target, backup = write_env(body, env_path)
+    _print(f"\nwrote {target} (mode 0600)")
+    if backup:
+        _print(f"backed up the previous file to {backup}")
+    for problem in problems:
+        _print(f"  WARNING {problem}")
+    _print("\nNext: `comp doctor --check-accounts`")
+    return 0
+
+
+def _prompt_for_pairs(teams: Sequence) -> list[Pair]:
+    """Ask for each team's pair, without echoing the secret."""
+    import getpass
+
+    _print("Paste each team's Alpaca PAPER credentials. Blank key id skips a "
+           "team.")
+    _print("Secrets are not echoed. Ctrl-C to abort.\n")
+    pairs: list[Pair] = []
+    for team in teams:
+        try:
+            key = input(f"  {team.name} ({team.key}) key id: ").strip()
+        except EOFError:
+            break
+        if not key:
+            continue
+        secret = getpass.getpass(f"  {team.name} secret (hidden): ").strip()
+        if not secret:
+            _print("    no secret given; skipping this team")
+            continue
+        pairs.append(Pair(key, secret, team.key))
+    return pairs
+
+
+# --------------------------------------------------------------------------- #
 # dashboard and status
 # --------------------------------------------------------------------------- #
 
@@ -1351,6 +1485,24 @@ def build_parser() -> argparse.ArgumentParser:
     lb.add_argument("--json", action="store_true")
     lb.add_argument("--write", default=None, help="write a results markdown file")
     lb.set_defaults(func=cmd_leaderboard)
+
+    sa = sub.add_parser("setup-accounts",
+                        help="parse, verify and write the teams' Alpaca keys")
+    sa.add_argument("--from-file", default=None,
+                    help="file of pasted key pairs ('-' for stdin); "
+                         "omit to be prompted per team")
+    sa.add_argument("--env-out", default=str(REPO_ROOT / ".env"))
+    sa.add_argument("--team", action="append", help="limit to these team keys")
+    sa.add_argument("--data-from", default=None,
+                    help="team whose keys feed the shared market data")
+    sa.add_argument("--verify", action="store_true",
+                    help="only check the credentials already in .env")
+    sa.add_argument("--allow-missing", action="store_true",
+                    help="write a partial .env when some teams have no keys")
+    sa.add_argument("--force", action="store_true",
+                    help="write even if verification found problems")
+    sa.add_argument("--dry-run", action="store_true")
+    sa.set_defaults(func=cmd_setup_accounts)
 
     db = sub.add_parser("dashboard", help="render the HTML dashboard")
     db.add_argument("--round", type=int, default=None,

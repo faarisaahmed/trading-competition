@@ -57,6 +57,13 @@ jobs:
       - name: Confirm the pool can supply the draft
         run: comp universe --size 500 > /dev/null
 
+      - name: Credential setup refuses bad input
+        run: |
+          # Parsing and refusal must work with no network and no keys.
+          printf 'garbage line\n' > /tmp/bad.txt
+          ! comp setup-accounts --from-file /tmp/bad.txt --dry-run
+          comp setup-accounts --verify || true
+
       - name: Status and dashboard render
         run: |
           comp status

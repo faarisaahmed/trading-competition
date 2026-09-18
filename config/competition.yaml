@@ -31,7 +31,11 @@ competition:
     max_gross_leverage: 1.0      # no margin -- gross exposure <= equity
     max_position_pct: 1.00       # a team MAY go 100% into one name
     min_order_notional: 1.0      # Alpaca's floor for notional orders
-    max_order_notional: 5000.0   # one order can never exceed the bankroll
+    # One order can never exceed the bankroll. Expressed as a MULTIPLE of the
+    # bankroll, not an absolute: a paper account's balance is whatever the
+    # Alpaca dashboard created it with (default $100k), and an absolute $5,000
+    # cap would silently limit every order to 5% of a $100k account.
+    max_order_notional_x_bankroll: 1.0
     max_orders_per_tick: 12
     max_orders_per_day: 2000     # abuse stop, not a strategy constraint
     # Hard circuit breaker. A team down this much intraday is flattened and
