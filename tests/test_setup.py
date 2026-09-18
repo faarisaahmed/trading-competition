@@ -21,6 +21,7 @@ from competition.setup import (
     mask,
     parse_pairs,
     render_env,
+    render_template,
     report,
     verify,
     write_env,
@@ -316,3 +317,42 @@ def test_masking():
     assert mask(KEY1).startswith("PKAA") and mask(KEY1).endswith("1111")
     assert KEY1 not in mask(KEY1)
     assert mask("short") == "…"
+
+
+# --------------------------------------------------------------------------- #
+# the labelled template
+# --------------------------------------------------------------------------- #
+
+
+def test_template_lists_every_team_in_order(cfg):
+    body = render_template(cfg)
+    for i, team in enumerate(cfg.teams, 1):
+        assert f"{i}. {team.name}" in body
+        assert f"\n{team.key}=" in body
+        assert f"comp-{i}-{team.key}" in body
+
+
+def test_template_parses_back_once_filled(cfg):
+    """The skeleton must be valid input after the keys are pasted in."""
+    body = render_template(cfg)
+    filled = []
+    for i, line in enumerate(body.splitlines()):
+        if line.endswith("=") and not line.startswith("#"):
+            filled.append(f"{line}PK{i:020d},secret{i:022d}")
+        else:
+            filled.append(line)
+    pairs = parse_pairs("\n".join(filled))
+    assert len(pairs) == len(cfg.teams)
+    assert {p.team for p in pairs} == set(cfg.team_keys)
+    assert [t.key for t, _p in assign(cfg, pairs)] == list(cfg.team_keys)
+
+
+def test_labelled_pairs_bind_by_name_not_position(cfg):
+    """The error the template exists to prevent: everything one row out."""
+    pairs = parse_pairs(
+        f"gambler={KEY1},{SEC1}\n"
+        f"trend_rider={KEY2},{SEC2}\n"      # deliberately reversed
+    )
+    bound = dict((t.key, p.key_id) for t, p in assign(cfg, pairs))
+    assert bound["gambler"] == KEY1
+    assert bound["trend_rider"] == KEY2

@@ -45,6 +45,7 @@ from .setup import (
     assign,
     parse_pairs,
     render_env,
+    render_template,
     report,
     write_env,
 )
@@ -1013,6 +1014,10 @@ def cmd_setup_accounts(args, cfg: CompetitionConfig) -> int:
     env_path = Path(args.env_out)
     teams = _teams_for(cfg, args.team)
 
+    if args.template:
+        sys.stdout.write(render_template(cfg))
+        return 0
+
     if args.verify:
         load_dotenv(args.env_file, override=True)
         bound = []
@@ -1495,6 +1500,8 @@ def build_parser() -> argparse.ArgumentParser:
     sa.add_argument("--team", action="append", help="limit to these team keys")
     sa.add_argument("--data-from", default=None,
                     help="team whose keys feed the shared market data")
+    sa.add_argument("--template", action="store_true",
+                    help="print a labelled keys.txt skeleton and exit")
     sa.add_argument("--verify", action="store_true",
                     help="only check the credentials already in .env")
     sa.add_argument("--allow-missing", action="store_true",

@@ -156,10 +156,12 @@ nine accounts over three logins triples your request headroom.)
    each, *Open New Paper Account* ×3. Set the same starting balance on all
    nine — $5,000 matches the rulebook, but $100k works too (strategies size by
    weight of equity, and order caps scale with the bankroll).
-2. Generate a key pair per account, paste them into a scratch file one per
-   line, and let the tool do the rest:
+2. Generate a key pair per account, paste them into a labelled skeleton, and
+   let the tool do the rest:
 
    ```bash
+   comp setup-accounts --template > keys.txt   # one team= line per team
+   #  ...paste each account's KEY,SECRET after the `=` ...
    comp setup-accounts --from-file keys.txt
    ```
 

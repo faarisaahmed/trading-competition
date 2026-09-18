@@ -60,10 +60,48 @@ Unequal bankrolls are the one condition that invalidates a round, and both
 `comp setup-accounts` and `comp doctor --check-accounts` refuse to proceed
 when they differ by more than 1%.
 
-### 3. Generate a key pair per account
+### 3. Name them so you can tell them apart
 
-Each paper account needs its own API key. Generate all nine and paste them
-into a scratch file, one account per line:
+Nine paper accounts identified only by account number is how keys end up
+against the wrong team. Label each one in the dashboard (or just note the
+account number beside the name in your scratch file):
+
+| # | Dashboard label | Team | Env prefix |
+|---|---|---|---|
+| 1 | `comp-1-trend_rider` | Trend Rider | `ALPACA_TREND_RIDER` |
+| 2 | `comp-2-mean_reverter` | Mean Reverter | `ALPACA_MEAN_REVERTER` |
+| 3 | `comp-3-q_learner` | Q-Learner | `ALPACA_Q_LEARNER` |
+| 4 | `comp-4-gambler` | The Gambler | `ALPACA_GAMBLER` |
+| 5 | `comp-5-stat_arb` | Stat Arb | `ALPACA_STAT_ARB` |
+| 6 | `comp-6-news_hound` | News Hound | `ALPACA_NEWS_HOUND` |
+| 7 | `comp-7-vol_breakout` | Vol Breakout | `ALPACA_VOL_BREAKOUT` |
+| 8 | `comp-8-scalper` | The Scalper | `ALPACA_SCALPER` |
+| 9 | `comp-9-benchmark` | Buy & Hold *(unscored)* | `ALPACA_BENCHMARK` |
+
+The numbering matches the roster order in `config/teams.yaml`, which is also
+the order `comp setup-accounts` assigns unlabelled pairs in.
+
+### 4. Generate a key pair per account
+
+Start from a labelled skeleton so misordering is impossible:
+
+```bash
+comp setup-accounts --template > keys.txt
+```
+
+That writes one `team=` line per team, in order, with the dashboard label in a
+comment. Paste each account's pair after the `=`:
+
+```
+# 4. The Gambler   dashboard label: comp-4-gambler
+gambler=PKAAAA...,secretaaaa...
+```
+
+Because each line names its team, **the order of the lines does not matter** —
+you cannot paste them one row out, which is the one setup error that is both
+easy to make and invisible afterwards.
+
+If you would rather not use the template, a bare file also works:
 
 ```
 # keys.txt -- delete this file once .env is written
@@ -78,7 +116,7 @@ alternating bare `KEY` / `SECRET` lines (which is what copy-pasting straight
 from the dashboard tends to give you). `#` comments and blank lines are
 ignored.
 
-### 4. Let the tool do the rest
+### 5. Let the tool do the rest
 
 ```bash
 comp setup-accounts --from-file keys.txt
@@ -112,7 +150,7 @@ To assign specific pairs to specific teams rather than in order, prefix each
 line: `gambler=PKAAAA...,secret...`. To be prompted instead of using a file,
 run `comp setup-accounts` with no arguments — secrets are read without echo.
 
-### 5. Confirm
+### 6. Confirm
 
 ```bash
 comp setup-accounts --verify     # re-check what is in .env

@@ -288,6 +288,36 @@ def render_env(
     return "\n".join(out) + "\n"
 
 
+def render_template(cfg: CompetitionConfig) -> str:
+    """A `keys.txt` skeleton with one labelled line per team.
+
+    Every line carries an explicit `team=` prefix, so the pairs bind by name
+    rather than by position. That removes the one setup error that is both easy
+    to make and nearly invisible afterwards: pasting nine keys one row out, so
+    every team trades the account labelled for its neighbour.
+    """
+    lines = [
+        "# Alpaca PAPER credentials, one account per team.",
+        "#",
+        "# Each line is:   <team>=<KEY_ID>,<SECRET>",
+        "# The team= prefix binds by name, so the ORDER of these lines does not",
+        "# matter -- you cannot paste them one row out.",
+        "#",
+        "# Suggested account label in the Alpaca dashboard is shown per team.",
+        "# Delete this file once `comp setup-accounts --from-file keys.txt` has",
+        "# written .env.",
+        "",
+    ]
+    for i, team in enumerate(cfg.teams, 1):
+        note = "" if team.scored else "   (unscored reference)"
+        lines += [
+            f"# {i}. {team.name}{note}   dashboard label: comp-{i}-{team.key}",
+            f"{team.key}=",
+            "",
+        ]
+    return "\n".join(lines)
+
+
 def write_env(body: str, path: str | Path) -> tuple[Path, Path | None]:
     """Write `.env` with 0600 permissions, backing up any existing file."""
     target = Path(path)
