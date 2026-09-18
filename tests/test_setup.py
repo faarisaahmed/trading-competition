@@ -329,7 +329,10 @@ def test_template_lists_every_team_in_order(cfg):
     for i, team in enumerate(cfg.teams, 1):
         assert f"{i}. {team.name}" in body
         assert f"\n{team.key}=" in body
-        assert f"comp-{i}-{team.key}" in body
+        # The dashboard Nickname to use is the env prefix, so the account is
+        # named after the variable it fills.
+        assert f"Nickname: {team.env_prefix}" in body
+    assert f"Set Funds: {cfg.starting_cash:,.0f}" in body
 
 
 def test_template_parses_back_once_filled(cfg):

@@ -60,28 +60,41 @@ Unequal bankrolls are the one condition that invalidates a round, and both
 `comp setup-accounts` and `comp doctor --check-accounts` refuse to proceed
 when they differ by more than 1%.
 
-### 3. Name them so you can tell them apart
+### 3. Name each account after the variable it fills
 
-Nine paper accounts identified only by account number is how keys end up
-against the wrong team. Label each one in the dashboard (or just note the
-account number beside the name in your scratch file):
+The *Open New Paper Account* dialog has a **Nickname** field. Use the team's
+env prefix — naming the account after the variable it fills removes any doubt
+about which account belongs to which strategy.
 
-| # | Dashboard label | Team | Env prefix |
-|---|---|---|---|
-| 1 | `comp-1-trend_rider` | Trend Rider | `ALPACA_TREND_RIDER` |
-| 2 | `comp-2-mean_reverter` | Mean Reverter | `ALPACA_MEAN_REVERTER` |
-| 3 | `comp-3-q_learner` | Q-Learner | `ALPACA_Q_LEARNER` |
-| 4 | `comp-4-gambler` | The Gambler | `ALPACA_GAMBLER` |
-| 5 | `comp-5-stat_arb` | Stat Arb | `ALPACA_STAT_ARB` |
-| 6 | `comp-6-news_hound` | News Hound | `ALPACA_NEWS_HOUND` |
-| 7 | `comp-7-vol_breakout` | Vol Breakout | `ALPACA_VOL_BREAKOUT` |
-| 8 | `comp-8-scalper` | The Scalper | `ALPACA_SCALPER` |
-| 9 | `comp-9-benchmark` | Buy & Hold *(unscored)* | `ALPACA_BENCHMARK` |
+| Login | # | Nickname | Set Funds | Team |
+|---|---|---|---|---|
+| 1 | 1 | `ALPACA_TREND_RIDER` | 5000 | Trend Rider |
+| 1 | 2 | `ALPACA_MEAN_REVERTER` | 5000 | Mean Reverter |
+| 1 | 3 | `ALPACA_Q_LEARNER` | 5000 | Q-Learner |
+| 2 | 4 | `ALPACA_GAMBLER` | 5000 | The Gambler |
+| 2 | 5 | `ALPACA_STAT_ARB` | 5000 | Stat Arb |
+| 2 | 6 | `ALPACA_NEWS_HOUND` | 5000 | News Hound |
+| 3 | 7 | `ALPACA_VOL_BREAKOUT` | 5000 | Vol Breakout |
+| 3 | 8 | `ALPACA_SCALPER` | 5000 | The Scalper |
+| 3 | 9 | `ALPACA_BENCHMARK` | 5000 | Buy & Hold *(unscored)* |
 
-The numbering matches the roster order in `config/teams.yaml`, which is also
-the order `comp setup-accounts` assigns unlabelled pairs in.
+Three things about that dialog:
+
+* **Set Funds: 5000 on all nine.** Identical bankrolls are the requirement;
+  the exact figure matters much less than the equality. It cannot be changed
+  afterwards without resetting the account.
+* **Leave "Sync to your live account balance" unchecked.** Ticking it makes
+  the paper balance mirror a real account, which would give nine different
+  starting points and invalidate the round.
+* **The cap of 3 includes the paper account you already have.** So per login:
+  reset the existing default account (choosing $5,000) and create two more.
 
 ### 4. Generate a key pair per account
+
+**Generate each account's keys immediately after creating it**, while you are
+still in that account's dashboard — the secret is displayed once and cannot be
+retrieved later, only regenerated. Create account, generate keys, paste, move
+on.
 
 Start from a labelled skeleton so misordering is impossible:
 

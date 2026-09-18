@@ -303,7 +303,9 @@ def render_template(cfg: CompetitionConfig) -> str:
         "# The team= prefix binds by name, so the ORDER of these lines does not",
         "# matter -- you cannot paste them one row out.",
         "#",
-        "# Suggested account label in the Alpaca dashboard is shown per team.",
+        "# The Alpaca dashboard's Nickname field takes the env prefix shown",
+        "# per team -- naming the account after the variable it fills removes",
+        "# any doubt about which account belongs to which strategy.",
         "# Delete this file once `comp setup-accounts --from-file keys.txt` has",
         "# written .env.",
         "",
@@ -311,7 +313,9 @@ def render_template(cfg: CompetitionConfig) -> str:
     for i, team in enumerate(cfg.teams, 1):
         note = "" if team.scored else "   (unscored reference)"
         lines += [
-            f"# {i}. {team.name}{note}   dashboard label: comp-{i}-{team.key}",
+            f"# {i}. {team.name}{note}",
+            f"#    Alpaca Nickname: {team.env_prefix}    Set Funds: "
+            f"{cfg.starting_cash:,.0f}",
             f"{team.key}=",
             "",
         ]
