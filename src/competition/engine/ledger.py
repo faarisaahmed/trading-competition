@@ -167,6 +167,30 @@ CREATE TABLE IF NOT EXISTS results (
     PRIMARY KEY (run_id, round_id, team_key)
 );
 
+CREATE TABLE IF NOT EXISTS round_progress (
+    round_id    INTEGER NOT NULL,
+    run_id      TEXT NOT NULL,
+    start_date  TEXT NOT NULL,
+    end_date    TEXT NOT NULL,
+    mode        TEXT NOT NULL,
+    broker      TEXT NOT NULL,
+    rules_hash  TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'in_progress',
+    ticks       INTEGER NOT NULL DEFAULT 0,
+    started_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (round_id, run_id)
+);
+
+CREATE TABLE IF NOT EXISTS round_state (
+    round_id   INTEGER NOT NULL,
+    run_id     TEXT NOT NULL,
+    team_key   TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    blob_json  TEXT NOT NULL,
+    PRIMARY KEY (round_id, run_id, team_key)
+);
+
 CREATE TABLE IF NOT EXISTS learned_state (
     team_key   TEXT NOT NULL,
     kind       TEXT NOT NULL,
@@ -182,6 +206,7 @@ CREATE INDEX IF NOT EXISTS idx_equity_team   ON equity (run_id, team_key, ts);
 CREATE INDEX IF NOT EXISTS idx_reject_team   ON rejections (run_id, team_key);
 CREATE INDEX IF NOT EXISTS idx_events_run    ON events (run_id, ts);
 CREATE INDEX IF NOT EXISTS idx_results_round ON results (round_id, team_key);
+CREATE INDEX IF NOT EXISTS idx_progress_status ON round_progress (status, round_id);
 """
 
 
@@ -400,6 +425,105 @@ class Ledger:
         )
 
     # ------------------------------------------------------------------ #
+    # round checkpoints (crash resume)
+    # ------------------------------------------------------------------ #
+
+    def open_round(
+        self, *, round_id: int, start: date, end: date, mode: str, broker: str,
+        rules_hash: str,
+    ) -> None:
+        """Mark a round as in progress, so a later process can find it."""
+        now = _iso(utcnow())
+        self._safe(
+            "INSERT OR REPLACE INTO round_progress (round_id, run_id, start_date, "
+            "end_date, mode, broker, rules_hash, status, ticks, started_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?, 'in_progress', "
+            "COALESCE((SELECT ticks FROM round_progress WHERE round_id=? AND run_id=?), 0), "
+            "COALESCE((SELECT started_at FROM round_progress WHERE round_id=? AND run_id=?), ?), "
+            "?)",
+            (round_id, self.run_id, _iso(start), _iso(end), mode, broker, rules_hash,
+             round_id, self.run_id, round_id, self.run_id, now, now),
+        )
+
+    def close_round(self, round_id: int, *, status: str = "complete",
+                    ticks: int | None = None) -> None:
+        """Mark a round finished for EVERY run that touched it.
+
+        Scoping this to the current run leaves an earlier, interrupted run's
+        row sitting at 'in_progress' -- so a round that had been resumed and
+        then completed would still look resumable, and the next `comp run`
+        would try to rejoin a finished round. A round is a property of the
+        competition, not of the process that happened to close it.
+        """
+        now = _iso(utcnow())
+        self._safe(
+            "UPDATE round_progress SET status = ?, updated_at = ? "
+            "WHERE round_id = ? AND status = 'in_progress'",
+            (status, now, round_id),
+        )
+        if ticks is not None:
+            self._safe(
+                "UPDATE round_progress SET ticks = ? WHERE round_id = ? AND run_id = ?",
+                (int(ticks), round_id, self.run_id),
+            )
+
+    def save_checkpoint(self, round_id: int, team_key: str, blob: Mapping[str, Any],
+                        *, ticks: int | None = None) -> None:
+        self._safe(
+            "INSERT OR REPLACE INTO round_state "
+            "(round_id, run_id, team_key, updated_at, blob_json) VALUES (?,?,?,?,?)",
+            (round_id, self.run_id, team_key, _iso(utcnow()), _j(dict(blob))),
+        )
+        if ticks is not None:
+            self._safe(
+                "UPDATE round_progress SET ticks = ?, updated_at = ? "
+                "WHERE round_id = ? AND run_id = ?",
+                (int(ticks), _iso(utcnow()), round_id, self.run_id),
+            )
+
+    def resumable_round(self, round_id: int) -> dict[str, Any] | None:
+        """The most recent in-progress round `round_id`, with every team's state.
+
+        Returns None when there is nothing to rejoin -- which is the normal
+        case for a fresh round.
+        """
+        rows = self.query(
+            "SELECT * FROM round_progress WHERE round_id = ? AND status = 'in_progress' "
+            "ORDER BY updated_at DESC LIMIT 1",
+            (round_id,),
+        )
+        if not rows:
+            return None
+        head = dict(rows[0])
+        states = self.query(
+            "SELECT team_key, blob_json, updated_at FROM round_state "
+            "WHERE round_id = ? AND run_id = ?",
+            (round_id, head["run_id"]),
+        )
+        teams: dict[str, Any] = {}
+        for row in states:
+            try:
+                teams[row["team_key"]] = json.loads(row["blob_json"])
+            except (json.JSONDecodeError, TypeError):
+                log.warning("checkpoint for %s is corrupt; ignoring", row["team_key"])
+        head["teams"] = teams
+        return head
+
+    def in_progress_rounds(self) -> list[sqlite3.Row]:
+        return self.query(
+            "SELECT * FROM round_progress WHERE status = 'in_progress' "
+            "ORDER BY round_id, updated_at DESC"
+        )
+
+    def round_progress(self, round_id: int) -> sqlite3.Row | None:
+        rows = self.query(
+            "SELECT * FROM round_progress WHERE round_id = ? "
+            "ORDER BY updated_at DESC LIMIT 1",
+            (round_id,),
+        )
+        return rows[0] if rows else None
+
+    # ------------------------------------------------------------------ #
     # learned state (survives between rounds -- the RL entries depend on it)
     # ------------------------------------------------------------------ #
 
@@ -517,7 +641,8 @@ class Ledger:
     def stats(self) -> dict[str, int]:
         out = {}
         for table in ("runs", "teams", "orders", "fills", "equity", "rejections",
-                      "events", "results", "universes", "drafts", "learned_state"):
+                      "events", "results", "universes", "drafts", "learned_state",
+                      "round_progress", "round_state"):
             rows = self.query(f"SELECT COUNT(*) AS n FROM {table}")
             out[table] = int(rows[0]["n"]) if rows else 0
         return out

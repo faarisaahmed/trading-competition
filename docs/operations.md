@@ -85,15 +85,23 @@ nohup comp run --round 1 --start 2026-09-21 -v > runs/round1.log 2>&1 &
 ```
 
 Or `screen` / `tmux`. It sleeps through nights and weekends on its own, so a
-single invocation covers the whole seven days.
+single invocation covers the whole seven days — and because it checkpoints,
+losing the process is recoverable rather than fatal (see Recovery below).
 
 ### During the round
 
+You should not need to do anything. To watch:
+
 ```bash
+open runs/dashboard.html             # self-refreshing, leave it open all week
+comp status                          # text snapshot: round, day, clock, standings
 tail -f runs/round1.log
 comp report --trades 20              # per-team detail from the ledger
 comp report --team gambler --trades 50
 ```
+
+`comp dashboard --open` re-renders it from the ledger at any time, including
+after a crash or once the round is over.
 
 What to watch:
 
@@ -117,11 +125,47 @@ comp leaderboard --write RESULTS.md      # commit this
 
 ## Recovery
 
-**The process died mid-round.** Just restart it with the same arguments.
-`comp run` will reset the accounts again, which means the round restarts from
-scratch — so if you are partway through, decide deliberately: either accept the
-restart, or score what exists with `comp score` and treat the round as short.
-The ledger keeps both runs, distinguished by `run_id`.
+**The process died mid-round.** Restart it with the same arguments. It will
+detect the in-progress round and rejoin it:
+
+```
+$ comp run --round 1 --start 2026-09-21
+
+  RESUMING round 1 from run 1af94fad64df4f22: 217 ticks already done,
+  last checkpoint 2026-09-24 14:43 UTC.
+  Accounts will NOT be reset; positions and strategy state are restored
+  from the checkpoint.
+```
+
+What comes back: each team's **original baseline equity** (so returns are still
+measured from the right zero), its strategy state (trailing stops, entry
+prices, cooldowns, the gambler's ladder rung, the pair trader's fitted betas),
+its risk state (session-open equity for the kill switch, the daily order
+count, whether it is halted), and the set of fills already processed so nothing
+is double-counted. Positions are not restored from the checkpoint — they live
+in the broker account, which is the authority.
+
+A checkpoint is written on every equity snapshot (five minutes by default), so
+a crash costs at most one snapshot interval of engine memory.
+
+**A resume can be refused.** If the rulebook hash, the round window or the team
+list has changed since the checkpoint, the resume is declined with a reason
+rather than silently producing a different competition:
+
+```
+  Found an in-progress round 1 but cannot resume it: the rulebook changed
+  since the checkpoint (a7f0635 -> 3b91c2e).
+  Pass --fresh to abandon it and restart the round from scratch.
+```
+
+**To deliberately restart a round**, `comp run --round N --fresh`. That
+flattens every account and starts from zero. It is never the default, because
+doing it by accident costs a week.
+
+**What a resume does not fix.** The market moved while you were down. A
+position held through a two-hour outage gets whatever price exists on restart,
+and its stops did not run in between. The round is salvaged, not rewound —
+note the outage alongside the results.
 
 **One team's credentials are broken.** `comp run --allow-missing` runs only the
 funded teams. Note it in the results: a round with seven entries is not the same

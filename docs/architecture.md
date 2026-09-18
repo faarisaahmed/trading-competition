@@ -31,7 +31,9 @@ cli.py                    operator interface; wires everything together
 engine/runner.py          the tick loop, round lifecycle, learned-state I/O
   ├── engine/universe.py  resolves each team's universe per round/session
   ├── engine/guardrails.py pre-trade risk, identical for all teams
+  ├── engine/checkpoint.py round state, serialised for crash resume
   ├── engine/ledger.py    SQLite record of everything
+  ├── reporting/          the HTML dashboard (a callback, never an import)
   └── scoring/            places, points, ties, season standings
   │
 strategies/  pickers/     the nine competitors (the only per-team code)
@@ -140,6 +142,41 @@ Two design rules:
 `learned_state` is why the RL entries work across rounds: the Q-table and the
 bandit model are saved at round end and restored at the next round's start.
 
+## Checkpoints and resume
+
+A round runs for seven days, so the process *will* be interrupted at some
+point. `engine/checkpoint.py` serialises each team's resumable state to the
+ledger on every equity snapshot; `prepare_round(resume=...)` restores it
+instead of resetting the accounts.
+
+What is checkpointed, and why each field matters:
+
+| Field | Why |
+|---|---|
+| `baseline_equity` | the round's measurement zero. Re-reading it live on resume would forgive a team's losses and make the round's scoring wrong for everyone. The single most important field. |
+| strategy `state` | trailing stops, entry prices, cooldowns, the martingale rung, fitted pair betas. Without it every strategy wakes up believing it is flat. |
+| risk state | session-open equity (so the kill switch measures the right drawdown), the daily order count, the halted flag. |
+| `seen_fills` | fills already processed, so a resume does not replay them into `on_fill`. |
+| `session_seen` | which sessions already fired `on_session_start`. |
+
+Positions are deliberately *not* checkpointed: they live in the broker account,
+which is the authority. The checkpoint only restores the engine's memory of
+what it was doing.
+
+Two subtleties that were bugs before they were features:
+
+* **A resumed round continues under the original `run_id`.** Otherwise the
+  round's orders, fills and equity curve split across two runs and
+  `comp report` shows an empty latest run.
+* **`close_round` closes every in-progress row for that round**, not just the
+  current run's. Scoping it to one run left the interrupted run's row at
+  `in_progress`, so a completed round still looked resumable and the next
+  `comp run` would try to rejoin a finished one.
+
+A resume is refused when the rulebook hash, the round window or the team list
+has changed -- each of those would make the resumed round a different
+competition from the interrupted one.
+
 ## Configuration
 
 `config/competition.yaml` is the rulebook — rounds, points, risk rails,
@@ -173,4 +210,6 @@ A bad rulebook should fail before the round, not at 3pm on day four.
 | `test_calendar.py` | holidays and Easter against published dates |
 | `test_broker.py` | fill model, oversell, overdraw, wire-format parsing |
 | `test_cli.py` | every subcommand |
+| `test_resume.py` | crash resume: positions survive, the baseline is restored rather than re-read, no fill replay, and every unsafe resume is refused |
+| `test_dashboard.py` | the chart rules as assertions -- one axis, colour by entity, no ninth hue, solid grid, escaping, and a broken dashboard cannot stop a round |
 | `test_config.py` | rulebook validation |

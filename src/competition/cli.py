@@ -35,6 +35,7 @@ from .data.feed import AlpacaFeed, ReplayFeed
 from .data.universe import UniverseProvider, UniverseSnapshot
 from .draft import DraftError, verify
 from .engine import CompetitionEngine, Ledger, UniverseResolver
+from .engine.checkpoint import load_round_checkpoint
 from .pickers import load_picker
 from .scoring import build_leaderboard, score_round
 from .strategies import load_strategy
@@ -43,6 +44,7 @@ from .types import UTC, Bar, utcnow
 log = logging.getLogger("competition.cli")
 
 DEFAULT_LEDGER = REPO_ROOT / "runs" / "competition.sqlite"
+DEFAULT_DASHBOARD = REPO_ROOT / "runs" / "dashboard.html"
 
 
 # --------------------------------------------------------------------------- #
@@ -129,6 +131,27 @@ def _parse_date(value: str | None) -> date | None:
 
 def _provider(cfg: CompetitionConfig, reader, trading_client=None) -> UniverseProvider:
     return UniverseProvider(reader=reader, trading_client=trading_client)
+
+
+def _attach_dashboard(engine, cfg: CompetitionConfig, args) -> None:
+    """Have the engine rewrite the HTML dashboard after each equity snapshot.
+
+    Registered as a callback so the engine never imports the reporting layer,
+    and so a rendering failure is logged rather than ending a round.
+    """
+    target = getattr(args, "dashboard", None)
+    if not target:
+        return
+    from .reporting import write_dashboard
+
+    path = Path(target)
+    refresh = getattr(args, "dashboard_refresh", 30)
+
+    def write(eng) -> None:
+        write_dashboard(cfg, path, engine=eng, refresh=refresh)
+
+    engine.set_dashboard(write)
+    _print(f"  dashboard: {path}  (refreshes every {refresh}s)")
 
 
 def _print(text: str) -> None:
@@ -731,6 +754,7 @@ def cmd_backtest(args, cfg: CompetitionConfig) -> int:
     )
     if args.resume_learning:
         engine.load_learned_state()
+    _attach_dashboard(engine, cfg, args)
 
     # The engine drives `now`; keep the shared clock in step with it.
     original_tick = engine.tick
@@ -778,6 +802,11 @@ def cmd_backtest(args, cfg: CompetitionConfig) -> int:
         for hand in result.draft["hands"]:
             _print(f"  {hand['team']:<14} sum={hand['rank_sum']} "
                    f"{', '.join(hand['symbols'])}")
+    if args.dashboard:
+        from .reporting import write_dashboard
+        out = write_dashboard(cfg, args.dashboard, engine=engine,
+                              refresh=args.dashboard_refresh)
+        _print(f"dashboard: {out}")
     _print(f"\nledger: {args.ledger} (run {ledger.run_id})")
     ledger.close()
     return 0
@@ -841,8 +870,37 @@ def cmd_run(args, cfg: CompetitionConfig) -> int:
                f"(round P&L is measured per-account either way).")
         return 1
 
+    # ---- is there an interrupted round to rejoin? ----------------------- #
+    probe = Ledger(args.ledger)
+    checkpoint = load_round_checkpoint(probe.resumable_round(rnd.id))
+    probe.close()
+    resume = None
+    if checkpoint is not None and not args.fresh:
+        ok, why = checkpoint.compatible_with(
+            round_id=rnd.id, start=start, end=end, rules_hash=cfg.rules_hash,
+            team_keys={t.key for t in teams},
+        )
+        if ok:
+            resume = checkpoint
+            _print(f"\n  RESUMING round {rnd.id} from run {checkpoint.run_id}: "
+                   f"{checkpoint.ticks} ticks already done, last checkpoint "
+                   f"{checkpoint.updated_at:%Y-%m-%d %H:%M} UTC.")
+            _print("  Accounts will NOT be reset; positions and strategy state "
+                   "are restored from the checkpoint.")
+        else:
+            _print(f"\n  Found an in-progress round {rnd.id} but cannot resume "
+                   f"it: {why}.")
+            _print("  Pass --fresh to abandon it and restart the round from "
+                   "scratch.")
+            return 1
+    elif checkpoint is not None and args.fresh:
+        _print(f"\n  --fresh: abandoning the in-progress round {rnd.id} "
+               f"({checkpoint.ticks} ticks) and restarting from scratch.")
+
     if args.dry_run:
         _print("\n--dry-run: setup validated, not trading.")
+        if resume is not None:
+            _print("             (a resume was detected and would be used)")
         return 0
 
     provider = _provider(cfg, reader, reader.client)
@@ -884,7 +942,9 @@ def cmd_run(args, cfg: CompetitionConfig) -> int:
         return {k: tuple(v) for k, v in table.items()}
 
     resolver = UniverseResolver(cfg, provider=provider, daily_bars=daily_bars, news=news)
-    ledger = Ledger(args.ledger)
+    # Continue the interrupted run rather than starting a parallel one, so the
+    # round has a single unbroken history in the ledger.
+    ledger = Ledger(args.ledger, run_id=resume.run_id if resume else None)
     ledger.start_run(
         round_id=rnd.id, mode="live", broker="alpaca", rules_hash=cfg.rules_hash,
         seed=cfg.fairness.competition_seed,
@@ -900,11 +960,12 @@ def cmd_run(args, cfg: CompetitionConfig) -> int:
         equity_snapshot_seconds=args.equity_every,
     )
     engine.load_learned_state()
+    _attach_dashboard(engine, cfg, args)
 
     try:
         result = engine.run_live(
             rnd, start=start, end=end, poll_seconds=args.poll,
-            max_ticks=args.max_ticks,
+            max_ticks=args.max_ticks, resume=resume,
         )
     except KeyboardInterrupt:
         _print("\ninterrupted -- flattening and scoring what we have.")
@@ -918,8 +979,109 @@ def cmd_run(args, cfg: CompetitionConfig) -> int:
             metrics=s.metrics,
         )
     ledger.finish_run(f"live round {rnd.id}")
+    if args.dashboard:
+        from .reporting import write_dashboard
+        write_dashboard(cfg, args.dashboard, engine=engine, refresh=0)
     _print("\n" + scored.table())
     _print(f"\nledger: {args.ledger} (run {ledger.run_id})")
+    ledger.close()
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+# dashboard and status
+# --------------------------------------------------------------------------- #
+
+
+def cmd_dashboard(args, cfg: CompetitionConfig) -> int:
+    from .reporting import write_dashboard
+
+    ledger = Ledger(args.ledger)
+    if args.run_id:
+        ledger.run_id = args.run_id
+    else:
+        runs = ledger.runs()
+        if runs:
+            ledger.run_id = runs[-1]["run_id"]
+    round_id = args.round
+    if round_id is None:
+        pending = ledger.in_progress_rounds()
+        if pending:
+            round_id = int(pending[0]["round_id"])
+        else:
+            scored = [r.id for r in cfg.rounds if ledger.results_for_round(r.id)]
+            round_id = scored[-1] if scored else None
+    out = write_dashboard(cfg, args.out, ledger=ledger, round_id=round_id,
+                          refresh=args.refresh)
+    ledger.close()
+    _print(f"wrote {out}")
+    if args.round is None and round_id is None:
+        _print("No round found in the ledger yet -- the page will be mostly empty. "
+               "Run a round, or pass --round N.")
+    if args.open:
+        import webbrowser
+        webbrowser.open(out.resolve().as_uri())
+        _print("opened in your browser")
+    else:
+        _print(f"open it with:  open {out}")
+    return 0
+
+
+def cmd_status(args, cfg: CompetitionConfig) -> int:
+    """Where the competition is right now, in one screen of text."""
+    cal = MarketCalendar()
+    ledger = Ledger(args.ledger)
+    runs = ledger.runs()
+    if runs:
+        ledger.run_id = args.run_id or runs[-1]["run_id"]
+
+    _print(f"{cfg.name}   rules {cfg.rules_hash}")
+    session = cal.session(utcnow())
+    if session.is_open:
+        m = session.minutes_to_close
+        clock = f"OPEN, {int(m // 60)}h {int(m % 60):02d}m to the close"
+    elif session.is_trading_day and session.open_at and utcnow() < session.open_at:
+        clock = f"pre-open, {session.seconds_to_open / 60:.0f}m to the bell"
+    else:
+        nxt = session.next_open
+        clock = f"closed, next open {nxt:%a %d %b %H:%M UTC}" if nxt else "closed"
+    _print(f"market   : {clock}   ({session.session_date})")
+
+    pending = ledger.in_progress_rounds()
+    _print("")
+    for rnd in cfg.rounds:
+        row = ledger.round_progress(rnd.id)
+        results = ledger.results_for_round(rnd.id)
+        if results:
+            ranked = sorted(results, key=lambda r: (r["place"] is None, r["place"]))
+            winner = ranked[0]
+            state = (f"COMPLETE  winner {winner['team_key']} "
+                     f"{winner['return_pct'] * 100:+.2f}%")
+        elif row is not None and row["status"] == "in_progress":
+            start = date.fromisoformat(row["start_date"][:10])
+            end = date.fromisoformat(row["end_date"][:10])
+            sessions = cal.trading_days(start, end)
+            done = sum(1 for d in sessions if d < session.session_date)
+            day = max(min((session.session_date - start).days + 1,
+                          (end - start).days + 1), 1)
+            state = (f"IN PROGRESS  day {day}/{(end - start).days + 1}, "
+                     f"session {done + (1 if session.is_open else 0)}/{len(sessions)}, "
+                     f"{row['ticks']} ticks, ends {end:%a %d %b}")
+        else:
+            state = "not started"
+        _print(f"round {rnd.id}  {rnd.name:<16} {state}")
+
+    if pending:
+        _print("")
+        for row in pending:
+            _print(f"resumable: round {row['round_id']} from run {row['run_id']} "
+                   f"({row['ticks']} ticks, updated {row['updated_at'][:19]}). "
+                   f"`comp run --round {row['round_id']}` will rejoin it.")
+
+    scores = _scores_from_ledger(cfg, ledger, [r.id for r in cfg.rounds])
+    if scores:
+        _print("")
+        _print(build_leaderboard(cfg, scores).table(title="STANDINGS SO FAR"))
     ledger.close()
     return 0
 
@@ -1150,6 +1312,11 @@ def build_parser() -> argparse.ArgumentParser:
     bt.add_argument("--equity-every", type=int, default=300)
     bt.add_argument("--resume-learning", action="store_true",
                     help="load saved Q-table / bandit state first")
+    bt.add_argument("--dashboard", nargs="?", const=str(DEFAULT_DASHBOARD),
+                    default=None,
+                    help="write an HTML dashboard as the backtest runs")
+    bt.add_argument("--dashboard-refresh", type=int, default=0,
+                    help="auto-refresh seconds for a backtest dashboard (0 = static)")
     bt.add_argument("--notes", default="")
     bt.set_defaults(func=cmd_backtest)
 
@@ -1161,6 +1328,12 @@ def build_parser() -> argparse.ArgumentParser:
     rn.add_argument("--poll", type=int, default=15, help="seconds between engine polls")
     rn.add_argument("--max-ticks", type=int, default=None)
     rn.add_argument("--equity-every", type=int, default=300)
+    rn.add_argument("--dashboard", nargs="?", const=str(DEFAULT_DASHBOARD),
+                    default=str(DEFAULT_DASHBOARD),
+                    help="write a live HTML dashboard here ('' to disable)")
+    rn.add_argument("--dashboard-refresh", type=int, default=30)
+    rn.add_argument("--fresh", action="store_true",
+                    help="abandon an in-progress round and restart it from scratch")
     rn.add_argument("--dry-run", action="store_true", help="validate setup and stop")
     rn.add_argument("--allow-missing", action="store_true",
                     help="run only the teams that have credentials")
@@ -1178,6 +1351,20 @@ def build_parser() -> argparse.ArgumentParser:
     lb.add_argument("--json", action="store_true")
     lb.add_argument("--write", default=None, help="write a results markdown file")
     lb.set_defaults(func=cmd_leaderboard)
+
+    db = sub.add_parser("dashboard", help="render the HTML dashboard")
+    db.add_argument("--round", type=int, default=None,
+                    help="which round (default: the in-progress or latest one)")
+    db.add_argument("--out", default=str(DEFAULT_DASHBOARD))
+    db.add_argument("--refresh", type=int, default=30,
+                    help="auto-refresh seconds; 0 disables")
+    db.add_argument("--run-id", default=None)
+    db.add_argument("--open", action="store_true", help="open it in a browser")
+    db.set_defaults(func=cmd_dashboard)
+
+    st = sub.add_parser("status", help="where the competition is right now")
+    st.add_argument("--run-id", default=None)
+    st.set_defaults(func=cmd_status)
 
     rp = sub.add_parser("report", help="per-team detail from the ledger")
     rp.add_argument("--team", action="append")

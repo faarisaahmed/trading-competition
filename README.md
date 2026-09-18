@@ -186,6 +186,48 @@ its own portfolio.
 The full runbook, including what to check each morning and how to recover from
 an interrupted round: [docs/operations.md](docs/operations.md).
 
+### Start it and walk away
+
+One `comp run` invocation covers the **whole seven days**. It sleeps through
+nights and weekends, re-runs each team's picker before the open each morning,
+flattens everyone 10 minutes before the final close, scores the round and
+writes the results. You do not tick it, and you do not babysit it.
+
+Two things make that safe rather than optimistic:
+
+**It checkpoints, so a crash does not void the week.** Every equity snapshot
+writes each team's baseline, positions-memory, strategy state and risk state to
+the ledger. If the process dies on day four — laptop sleeps, SSH drops, Python
+trips — you restart the same command and it *rejoins* the round:
+
+```
+$ comp run --round 1 --start 2026-09-21
+
+  RESUMING round 1 from run 1af94fad64df4f22: 217 ticks already done,
+  last checkpoint 2026-09-24 14:43 UTC.
+  Accounts will NOT be reset; positions and strategy state are restored
+  from the checkpoint.
+```
+
+Crucially it restores each team's **original baseline**, not its current
+equity — otherwise a team down 3% would have its loss quietly forgiven and the
+round's scoring would be wrong for everyone. A resume is refused outright if
+the rulebook hash, the round window or the team list has changed since the
+checkpoint; `--fresh` abandons the round and restarts it from zero, but you
+have to ask for that explicitly.
+
+**It writes a dashboard you can leave open.** `runs/dashboard.html` is rewritten
+on every snapshot and refreshes itself every 30 seconds — equity curves for all
+nine entries, standings, per-team positions, a round countdown, the trade tape
+with each strategy's stated reason, and engine health. No server, no
+dependencies, no network: it opens from `file://`.
+
+```bash
+comp run --round 1 --start 2026-09-21 &   # writes runs/dashboard.html
+open runs/dashboard.html                  # leave this tab open all week
+comp status                               # or a text snapshot, any time
+```
+
 ---
 
 ## How fairness is enforced, mechanically
@@ -240,10 +282,26 @@ tests, including 72 that do nothing but attack the draft.
 | `comp run --round N` | run live against Alpaca paper accounts |
 | `comp score --round N` | score a completed round |
 | `comp leaderboard [--markdown]` | season standings |
+| `comp status` | where the competition is right now |
+| `comp dashboard [--open]` | render the live HTML dashboard |
 | `comp report [--trades N]` | per-team detail from the ledger |
 | `comp explain-news "headline"` | show the sentiment scorer's working |
 
 ---
+
+## Watching a round
+
+![dashboard](docs/dashboard.png)
+
+The chart obeys a few rules worth naming, because they are the ones usually
+broken: **one y-axis** (all nine curves are dollars from the same bankroll, so
+a second scale would invent a correlation); **colour follows the team, not its
+rank**, so the standings reordering never repaints a line; there are exactly
+eight scored teams and exactly eight colour slots, validated for
+colour-vision deficiency in both light and dark mode, with the benchmark drawn
+in muted ink rather than a made-up ninth hue; and the x-axis is
+*snapshot order*, not clock time, because a time axis would draw a flat line
+across every night and weekend and make a four-session round look motionless.
 
 ## Architecture
 
@@ -261,7 +319,8 @@ src/competition/
   draft/rank_sum.py       the Round 3 dealer and its independent verifier
   strategies/             one module per team (+ the sentiment lexicon)
   pickers/                one picker per team
-  engine/                 guardrails, ledger, universe resolution, the tick loop
+  engine/                 guardrails, ledger, checkpoints, the tick loop
+  reporting/              the HTML dashboard and its validated palette
   scoring/                places, points, tie handling, season standings
   cli.py                  the `comp` command
 ```
@@ -304,6 +363,11 @@ does not publish, so `data/top500.csv` carries them as a dated snapshot that
 * **Three weeks is not enough to separate skill from luck.** Eight strategies
   over 12–15 sessions will produce a winner, and that winner will be partly
   lucky. The Gambler exists to make that point explicit rather than hide it.
+* **A resume is not free of consequence.** It restores the engine's memory
+  exactly, but the market moved while the process was down. A strategy holding
+  a position through a two-hour outage gets whatever price exists when it comes
+  back, and its stops did not run in between. The round is salvaged, not
+  rewound.
 * **The RL entry starts close to ignorant.** A tabular agent pre-trained on a
   few months of bars is a real RL agent, but it is not a good one. Its interest
   is whether learning across three rounds beats hand-written rules.

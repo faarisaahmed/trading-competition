@@ -30,7 +30,7 @@ import traceback
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..broker.base import Broker, BrokerError, OrderRejected
 from ..config import CompetitionConfig, RoundConfig, TeamConfig
@@ -50,11 +50,54 @@ from ..types import (
     utcnow,
 )
 from ..util import indicators as ind
+from .checkpoint import RoundCheckpoint, TeamCheckpoint
 from .guardrails import Guardrails, RiskState
 from .ledger import Ledger
 from .universe import UniverseResolver
 
+if TYPE_CHECKING:  # pragma: no cover -- imported lazily to avoid a cycle
+    from ..draft.rank_sum import DraftResult
+
 log = logging.getLogger("competition.engine")
+
+
+def draft_from_dict(payload: Mapping[str, Any]) -> DraftResult:
+    """Rebuild a `DraftResult` from its ledger payload.
+
+    A resumed Round 3 must reuse the hands that were actually dealt. Re-dealing
+    with the same seed would *usually* reproduce them, but "usually" is not a
+    property a fairness guarantee can rest on -- and if the pool file changed
+    in between it would silently deal a different competition.
+    """
+    from ..data.universe import ValuationRow
+    from ..draft.rank_sum import DraftResult, Hand
+
+    hands = []
+    for raw in payload.get("hands", []):
+        symbols = tuple(str(x) for x in raw.get("symbols", ()))
+        ranks = tuple(int(x) for x in raw.get("ranks", ()))
+        names = list(raw.get("names") or [])
+        sectors = raw.get("sectors") or {}
+        rows = tuple(
+            ValuationRow(rank=r, symbol=s,
+                         name=names[i] if i < len(names) else s,
+                         sector=str(next(iter(sectors), "Unknown")) if sectors else "Unknown")
+            for i, (s, r) in enumerate(zip(symbols, ranks, strict=False))
+        )
+        hands.append(Hand(str(raw.get("team", "")), ranks, symbols, rows))
+    return DraftResult(
+        hands=tuple(hands),
+        target_sum=int(payload.get("target_sum", 0)),
+        pool_size=int(payload.get("pool_size", 500)),
+        picks_per_team=int(payload.get("picks_per_team", 10)),
+        method=str(payload.get("method", "exchange")),
+        seed=int(payload.get("seed", 0)),
+        metric=str(payload.get("metric", "market_cap")),
+        pool_as_of=str(payload.get("pool_as_of", "")),
+        pool_source=str(payload.get("pool_source", "")),
+        attempts=int(payload.get("attempts", 1)),
+        notes=tuple(payload.get("notes") or ()),
+    )
 
 
 @dataclass
@@ -217,6 +260,16 @@ class CompetitionEngine:
             )
         self._last_equity_snapshot: datetime | None = None
         self._rotation = 0
+        #: Set while a round is running, so equity snapshots can checkpoint.
+        self._round: RoundConfig | None = None
+        self._ticks = 0
+        self.resuming = False
+        #: Invoked after each equity snapshot, for the dashboard writer. A
+        #: callback rather than an import, so the engine never depends on the
+        #: reporting layer.
+        self._dashboard: Callable[[CompetitionEngine], None] | None = None
+        #: (start, end) of the round in progress, for the countdown display.
+        self.round_window: tuple[date, date] | None = None
 
     # ------------------------------------------------------------------ #
     # learned state
@@ -257,18 +310,46 @@ class CompetitionEngine:
     # setup
     # ------------------------------------------------------------------ #
 
-    def prepare_round(self, rnd: RoundConfig, *, session: date, reset_accounts: bool = True) -> None:
-        """Reset accounts, deal Round 3 if needed, resolve universes, warm the feed."""
+    def prepare_round(
+        self,
+        rnd: RoundConfig,
+        *,
+        session: date,
+        reset_accounts: bool = True,
+        resume: RoundCheckpoint | None = None,
+    ) -> None:
+        """Reset accounts, deal Round 3 if needed, resolve universes, warm the feed.
+
+        When `resume` is supplied the accounts are left alone and every team's
+        engine-side memory is restored from the checkpoint instead. That is the
+        difference between rejoining an interrupted round and starting a brand
+        new one on top of live positions.
+        """
+        resuming = resume is not None and resume.is_resumable
+        self.resuming = resuming
+        self._round = rnd
+        if resuming and resume.run_id and self.ledger.run_id != resume.run_id:
+            # Continue writing under the interrupted run's id. A resumed round
+            # is one continuous round, so its orders, fills, equity curve and
+            # checkpoints all belong to a single run -- otherwise the history
+            # splits in two and `comp report` shows an empty latest run.
+            log.info("adopting run id %s from the checkpoint", resume.run_id)
+            self.ledger.run_id = resume.run_id
         self.ledger.record_event(
-            "round_prepare", f"round {rnd.id} ({rnd.name})",
+            "round_resume" if resuming else "round_prepare",
+            f"round {rnd.id} ({rnd.name})",
             data={"mode": self.mode, "universe_mode": rnd.universe_mode,
-                  "teams": list(self.teams)},
+                  "teams": list(self.teams),
+                  "resumed_from_run": resume.run_id if resuming else None,
+                  "resumed_at_tick": resume.ticks if resuming else 0},
         )
         for rt in self.teams.values():
             self.ledger.register_team(rt.config)
             rt.rng = random.Random(self.cfg.team_seed(rt.key, rnd.id))
             rt.state = {}
             rt.risk = RiskState(rt.key)
+            if resuming:
+                continue
             if reset_accounts:
                 try:
                     rt.broker.reset_for_round(self.cfg.starting_cash)
@@ -280,13 +361,22 @@ class CompetitionEngine:
             rt.baseline_equity = float(baseline or self.cfg.starting_cash)
 
         if rnd.universe_mode == "draft" and self.resolver.draft is None:
-            draft = self.resolver.run_draft(
-                rnd, [rt.config for rt in self.teams.values()],
-                seed=self.cfg.fairness.competition_seed + rnd.id,
-            )
-            self.ledger.record_draft(rnd.id, draft)
+            if resuming:
+                recorded = self.ledger.latest_draft(rnd.id)
+                if recorded:
+                    self.resolver.set_draft(draft_from_dict(recorded))
+                    log.info("round %d: reusing the recorded draft", rnd.id)
+            if self.resolver.draft is None:
+                draft = self.resolver.run_draft(
+                    rnd, [rt.config for rt in self.teams.values()],
+                    seed=self.cfg.fairness.competition_seed + rnd.id,
+                )
+                self.ledger.record_draft(rnd.id, draft)
 
-        self.refresh_universes(rnd, session=session)
+        if resuming:
+            self._restore(resume)
+        else:
+            self.refresh_universes(rnd, session=session)
 
         all_symbols = sorted({s for rt in self.teams.values() for s in rt.universe})
         if all_symbols:
@@ -295,6 +385,48 @@ class CompetitionEngine:
             "round_ready", f"round {rnd.id} universes resolved",
             data={rt.key: list(rt.universe) for rt in self.teams.values()},
         )
+
+    def _restore(self, resume: RoundCheckpoint) -> None:
+        """Put every team back exactly where the interrupted process left it."""
+        for key, snapshot in resume.teams.items():
+            rt = self.teams.get(key)
+            if rt is None:
+                continue
+            curve = []
+            for ts, equity in self.ledger.equity_curve(key):
+                try:
+                    curve.append((datetime.fromisoformat(ts).astimezone(UTC), equity))
+                except ValueError:
+                    continue
+            snapshot.apply_to(rt, equity_curve=curve)
+            try:
+                account = rt.broker.account()
+                held = len(account.positions)
+                live = account.equity
+            except BrokerError:
+                held, live = -1, 0.0
+            log.info(
+                "%s resumed: baseline %.2f, live equity %.2f (%+.2f%%), tick %d, "
+                "%d position(s), universe: %s",
+                key, rt.baseline_equity, live,
+                (live / rt.baseline_equity - 1.0) * 100 if rt.baseline_equity else 0.0,
+                rt.tick_count, held, ", ".join(rt.universe) or "(none)",
+            )
+        self._ticks = resume.ticks
+        self.ledger.record_event(
+            "round_restored", f"{len(resume.teams)} team(s) restored",
+            data={"ticks": resume.ticks, "from_run": resume.run_id},
+        )
+
+    def checkpoint(self, rnd: RoundConfig, *, ticks: int | None = None) -> None:
+        """Persist every team's resumable state. Cheap, and best-effort."""
+        for rt in self.teams.values():
+            try:
+                blob = TeamCheckpoint.from_runtime(rt).to_dict()
+            except Exception as e:  # noqa: BLE001 -- never let this end a round
+                log.warning("%s: could not build a checkpoint: %s", rt.key, e)
+                continue
+            self.ledger.save_checkpoint(rnd.id, rt.key, blob, ticks=ticks)
 
     def refresh_universes(self, rnd: RoundConfig, *, session: date) -> None:
         """Re-run the pickers for a new session (Round 2 and 3, once a day)."""
@@ -601,12 +733,34 @@ class CompetitionEngine:
                 continue
             rt.equity_curve.append((now, account.equity))
             self.ledger.record_equity(rt.key, now, account)
+        if self._round is not None:
+            # Checkpoint on the same beat as the equity snapshot: it is the
+            # natural "something worth remembering changed" moment, and it
+            # bounds a crash to one snapshot interval of lost progress.
+            self.checkpoint(self._round, ticks=self._ticks)
+        if self._dashboard is not None:
+            try:
+                self._dashboard(self)
+            except Exception as e:  # noqa: BLE001 -- a report must never stop a round
+                log.warning("dashboard write failed: %s", e)
 
     # ------------------------------------------------------------------ #
     # round lifecycle
     # ------------------------------------------------------------------ #
 
+    def set_dashboard(self, callback) -> None:
+        """Register a callable run after each equity snapshot."""
+        self._dashboard = callback
+
     def start_round(self, rnd: RoundConfig) -> None:
+        self._round = rnd
+        if self.resuming:
+            # `on_round_start` re-fits pairs, resets ladders and logs banners.
+            # On a resume that state came back from the checkpoint, so running
+            # it again would quietly undo the restore.
+            log.info("round %d: resumed at tick %d, skipping on_round_start",
+                     rnd.id, self._ticks)
+            return
         for rt in self.teams.values():
             try:
                 account = rt.broker.account()
@@ -684,6 +838,11 @@ class CompetitionEngine:
         self._feedback_to_pickers(results)
         self.save_learned_state(rnd.id)
 
+        # The round is over: mark it complete so a later `comp run` starts a
+        # fresh round rather than trying to rejoin a finished one.
+        self.ledger.close_round(rnd.id, status="complete", ticks=ticks)
+        self._round = None
+
         draft_payload = self.resolver.draft.to_dict() if self.resolver.draft else None
         return RoundResult(
             round_id=rnd.id,
@@ -741,6 +900,15 @@ class CompetitionEngine:
             raise ValueError(f"no trading sessions between {start} and {end}")
         sessions = cal.trading_days(start, end)
         started_at = stamps[0]
+        self.round_window = (start, end)
+        # Open a round record for replays too, not just live runs: it is what
+        # the dashboard reads the round window and tick count from, and it
+        # makes a backtest checkpoint in exactly the same way a live round
+        # does -- so the resume path is exercised by every dry run.
+        self.ledger.open_round(
+            round_id=rnd.id, start=start, end=end, mode=self.mode,
+            broker="sim", rules_hash=self.cfg.rules_hash,
+        )
 
         self.prepare_round(rnd, session=sessions[0])
         self.start_round(rnd)
@@ -764,6 +932,7 @@ class CompetitionEngine:
                 sessions_left=remaining,
                 final_session=(remaining == 0),
             )
+            self._ticks = i + 1
             if progress_cb and (i % 100 == 0 or i == total - 1):
                 progress_cb(i + 1, total, ts)
         return self.finish_round(rnd, started_at=started_at, ticks=total)
@@ -778,6 +947,7 @@ class CompetitionEngine:
         max_ticks: int | None = None,
         sleep: Callable[[float], None] = time.sleep,
         stop: Callable[[], bool] | None = None,
+        resume: RoundCheckpoint | None = None,
     ) -> RoundResult:
         """Run against live Alpaca paper accounts until the window closes."""
         cal = self.feed.calendar
@@ -785,14 +955,20 @@ class CompetitionEngine:
         if not sessions:
             raise ValueError(f"no trading sessions between {start} and {end}")
         started_at = self.clock()
-        self.prepare_round(rnd, session=sessions[0])
+        self.round_window = (start, end)
+        self.ledger.open_round(
+            round_id=rnd.id, start=start, end=end, mode=self.mode,
+            broker="alpaca", rules_hash=self.cfg.rules_hash,
+        )
+        self.prepare_round(rnd, session=sessions[0], resume=resume)
         self.start_round(rnd)
         log.info(
-            "round %d live: %s (%d sessions), %d teams",
-            rnd.id, cal.describe_window(start, end), len(sessions), len(self.teams),
+            "round %d live%s: %s (%d sessions), %d teams",
+            rnd.id, " [RESUMED]" if self.resuming else "",
+            cal.describe_window(start, end), len(sessions), len(self.teams),
         )
 
-        ticks = 0
+        ticks = self._ticks
         current_session = None
         last_session_seen = None
         while True:
@@ -855,6 +1031,7 @@ class CompetitionEngine:
             self.tick(rnd, now=now, progress=min(progress, 1.0),
                       sessions_left=remaining, final_session=final_day)
             ticks += 1
+            self._ticks = ticks
             sleep(poll_seconds)
 
         return self.finish_round(rnd, started_at=started_at, ticks=ticks)
