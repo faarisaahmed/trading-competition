@@ -9,16 +9,19 @@ comp setup-accounts --from-file keys.txt   # see docs/accounts.md
 comp doctor --check-accounts
 ```
 
-Getting the nine accounts is three Alpaca sign-ups, not nine — the dashboard
-caps paper accounts at 3 per login. [docs/accounts.md](accounts.md) walks
-through it.
+Nine teams run on **three** Alpaca paper accounts under one login — the
+dashboard caps paper accounts at 3 per login, so each account holds three
+teams, partitioned into virtual books in software.
+[docs/accounts.md](accounts.md) walks through it, including how to switch to
+nine real accounts if you would rather have broker-enforced isolation.
 
 `doctor` is the gate. It must show no `ERROR` lines before you run anything
 live. In particular it fails if:
 
 * any account is a **live** account rather than paper;
 * trading is blocked on an account;
-* the nine accounts' equities differ by more than 1% of the bankroll.
+* an account's equity is off by more than 1% from what its teams need
+  ($15,000 for a three-team account, $5,000 for a single team).
 
 ### Equalising the accounts
 
@@ -26,8 +29,9 @@ Alpaca paper balances cannot be set over the API. Set the starting balance when
 you *create* each paper account in the dashboard (the default is $100,000 and
 it cannot be changed afterwards without a reset).
 
-`$5,000` matches the rulebook exactly. Any equal value works: every strategy
-sizes by weight of equity, and the order-size cap is a multiple of the bankroll
+`$15,000` per three-team account matches the rulebook exactly. Any equal value
+works, as long as every account holds the same amount **per team**: strategies
+size by weight of equity, and the order-size cap is a multiple of the bankroll
 rather than a fixed dollar figure — just set `competition.starting_cash` to
 match so the reports read correctly.
 

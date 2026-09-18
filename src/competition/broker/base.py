@@ -78,6 +78,16 @@ class Broker(abc.ABC):
 
     # -- lifecycle hooks --------------------------------------------------- #
 
+    def flush(self) -> list[Order]:
+        """Send anything buffered for this tick. No-op for direct brokers.
+
+        Only the shared-account layer buffers: it has to see every team's
+        intents for a tick before it can net opposing orders, because Alpaca
+        rejects a buy and a sell on the same symbol in one account as a
+        potential wash trade.
+        """
+        return []
+
     def sync(self, now: datetime | None = None) -> None:
         """Advance internal state (simulator fills, cache invalidation)."""
 

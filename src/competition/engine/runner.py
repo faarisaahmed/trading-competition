@@ -265,6 +265,8 @@ class CompetitionEngine:
         self._round: RoundConfig | None = None
         self._ticks = 0
         self.resuming = False
+        #: Populated by the CLI when teams share real broker accounts.
+        self.shared_accounts: list = []
         #: Invoked after each equity snapshot, for the dashboard writer. A
         #: callback rather than an import, so the engine never depends on the
         #: reporting layer.
@@ -421,6 +423,17 @@ class CompetitionEngine:
 
     def checkpoint(self, rnd: RoundConfig, *, ticks: int | None = None) -> None:
         """Persist every team's resumable state. Cheap, and best-effort."""
+        # With shared accounts the per-team split of cash and positions exists
+        # ONLY in this process -- the broker just sees one pooled account. So
+        # unlike real accounts, losing it means losing the round.
+        for shared in getattr(self, "shared_accounts", ()):
+            try:
+                self.ledger.save_learned_state(
+                    shared.name, "shared_books", shared.to_dict(), round_id=rnd.id
+                )
+            except Exception as e:  # noqa: BLE001
+                log.error("could not checkpoint %s's virtual books: %s",
+                          shared.name, e)
         for rt in self.teams.values():
             try:
                 blob = TeamCheckpoint.from_runtime(rt).to_dict()
@@ -704,6 +717,27 @@ class CompetitionEngine:
                     self._submit(rt, validated.accepted, now)
                     acted += 1
             self._collect_fills(rt, ctx)
+
+        # Flush any buffered orders. The shared-account layer needs every
+        # team's intents for the tick before it can net opposing same-symbol
+        # orders, so submission is deferred to here. Direct brokers no-op.
+        for rt in self.teams.values():
+            try:
+                flushed = rt.broker.flush()
+            except BrokerError as e:
+                log.error("%s: flush failed: %s", rt.key, e)
+                continue
+            if flushed:
+                rt.orders.extend(flushed)
+                self.ledger.record_orders(rt.key, flushed)
+        for rt in self.teams.values():
+            account = None
+            with contextlib.suppress(BrokerError):
+                account = rt.broker.account()
+            if account is not None:
+                ctx = self._context(rt, snapshot, account, rnd, progress,
+                                    sessions_left, final_session)
+                self._collect_fills(rt, ctx)
 
         self._snapshot_equity(now, force=False)
         return acted

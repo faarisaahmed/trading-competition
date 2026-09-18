@@ -147,27 +147,34 @@ comp leaderboard
 
 ### Going live
 
-You need **one Alpaca paper account per team** — nine of them, so each trades
-its own portfolio. Alpaca caps paper accounts at **3 per login**, so that is
-**3 sign-ups**, not 9. (Bonus: data rate limits are per *owner*, so spreading
-nine accounts over three logins triples your request headroom.)
+You need **three Alpaca paper accounts** on **one login**. Alpaca caps paper
+accounts at 3 per login, so nine separate accounts would mean nine sign-ups;
+instead each account holds three teams and is partitioned in software into
+three virtual books, with orders tagged per team and opposing orders crossed
+internally at the mid. (Alpaca rejects opposing same-symbol orders inside one
+account as wash trades, so the crossing is a requirement, not an
+optimisation.) Every flush reconciles the virtual books against the real
+account or the run stops.
 
-1. Three sign-ups at [app.alpaca.markets](https://app.alpaca.markets); under
-   each, *Open New Paper Account* ×3. Set the same starting balance on all
-   nine — $5,000 matches the rulebook, but $100k works too (strategies size by
-   weight of equity, and order caps scale with the bankroll).
+1. One sign-up at [app.alpaca.markets](https://app.alpaca.markets); *Open New
+   Paper Account* ×3 (the cap of 3 includes the one you already have, so reset
+   that one and add two). For each: **Nickname** `ALPACA_GROUP_A` / `_B` /
+   `_C`, **Set Funds 15000** (= 3 teams × $5,000), and leave *Sync to your
+   live account balance* **unchecked**. The balance cannot be changed later
+   without resetting the account.
 2. Generate a key pair per account, paste them into a labelled skeleton, and
    let the tool do the rest:
 
    ```bash
-   comp setup-accounts --template > keys.txt   # one team= line per team
+   comp setup-accounts --template > keys.txt   # one labelled line per account
    #  ...paste each account's KEY,SECRET after the `=` ...
    comp setup-accounts --from-file keys.txt
    ```
 
-   It assigns pairs to teams, verifies every one against Alpaca, refuses any
-   **live** account, warns on unequal balances, and writes `.env` at mode
-   `0600`. Secrets are never printed. Then delete the scratch file.
+   It binds pairs by label (so the order cannot be wrong), verifies every one
+   against Alpaca, refuses any **live** account or one funded for fewer teams
+   than it holds, and writes `.env` at mode `0600`. Secrets are never printed.
+   Then delete the scratch file.
 3. Pre-flight:
 
    ```bash
@@ -177,7 +184,9 @@ nine accounts over three logins triples your request headroom.)
    This **refuses to proceed** if the accounts differ by more than 1% of the
    bankroll. Unequal starting money is the one thing that invalidates a round.
 
-Full walkthrough, including the one-account alternative:
+Prefer broker-enforced isolation? Three logins × three $5,000 accounts and
+`accounts.mode: per_team` in the rulebook gives every team its own real
+account; nothing else changes. Full walkthrough either way:
 [docs/accounts.md](docs/accounts.md).
 
 4. Pre-train the RL entry once, before Round 1 (this is the coding stage, so it

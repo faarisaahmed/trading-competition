@@ -27,11 +27,11 @@ from pathlib import Path
 
 from .broker.alpaca import AlpacaClient, AlpacaCredentials
 from .broker.base import BrokerError
-from .config import CompetitionConfig, TeamConfig
+from .config import CompetitionConfig
 
 #: A pasted pair, however the dashboard formatted it.
 _PAIR = re.compile(
-    r"^\s*(?:(?P<team>[a-z][a-z0-9_]*)\s*[:=]\s*)?"
+    r"^\s*(?:(?P<team>[a-z][a-z0-9_-]*)\s*[:=]\s*)?"
     r"(?P<key>[A-Za-z0-9]{12,})\s*[,;:\s]\s*(?P<secret>[A-Za-z0-9/+_-]{20,})\s*$"
 )
 _BARE = re.compile(r"^\s*(?P<value>[A-Za-z0-9/+_-]{12,})\s*$")
@@ -58,11 +58,59 @@ class Pair:
         return mask(self.key_id)
 
 
+@dataclass(frozen=True)
+class Target:
+    """Something that needs one Alpaca key pair.
+
+    In `per_team` mode that is a team; in `shared` mode it is an account
+    group holding several teams. Making it explicit keeps the setup flow
+    identical either way -- only the number of pairs and the required capital
+    change.
+    """
+
+    key: str
+    name: str
+    env_prefix: str
+    capital: float
+    teams: tuple[str, ...] = ()
+
+    @property
+    def is_group(self) -> bool:
+        return len(self.teams) > 1
+
+
+def targets_for(cfg: CompetitionConfig, *, only: Sequence[str] | None = None) -> list[Target]:
+    """One credential target per real Alpaca account the rulebook needs."""
+    if cfg.accounts.is_shared:
+        out = []
+        for group in cfg.accounts.groups:
+            members = tuple(
+                t.key for t in cfg.teams
+                if t.key in group.teams and (not only or t.key in set(only))
+            )
+            if not members:
+                continue
+            out.append(Target(
+                key=group.label,
+                name=f"{group.label} ({', '.join(members)})",
+                env_prefix=group.env_prefix,
+                capital=cfg.starting_cash * len(members),
+                teams=members,
+            ))
+        return out
+    return [
+        Target(key=t.key, name=t.name, env_prefix=t.env_prefix,
+               capital=cfg.starting_cash, teams=(t.key,))
+        for t in cfg.teams
+        if not only or t.key in set(only)
+    ]
+
+
 @dataclass
 class Checked:
-    """One verified (or failed) credential pair, bound to a team."""
+    """One verified (or failed) credential pair, bound to an account target."""
 
-    team: TeamConfig
+    team: Target
     pair: Pair
     ok: bool = False
     account_number: str = ""
@@ -142,32 +190,36 @@ def parse_pairs(text: str) -> list[Pair]:
 
 
 def assign(cfg: CompetitionConfig, pairs: Sequence[Pair],
-           *, only: Sequence[str] | None = None) -> list[tuple[TeamConfig, Pair]]:
-    """Bind pairs to teams -- explicitly where given, else in roster order."""
-    teams = [t for t in cfg.teams if not only or t.key in set(only)]
+           *, only: Sequence[str] | None = None) -> list[tuple[Target, Pair]]:
+    """Bind pairs to accounts -- explicitly where labelled, else in order."""
+    targets = targets_for(cfg, only=only)
+    valid = {t.key for t in targets_for(cfg)}
     explicit = {p.team: p for p in pairs if p.team}
-    unknown = set(explicit) - {t.key for t in cfg.teams}
+    unknown = set(explicit) - valid
     if unknown:
-        raise SetupError(f"unknown team key(s): {', '.join(sorted(unknown))}")
+        raise SetupError(
+            f"unknown account key(s): {', '.join(sorted(unknown))}. "
+            f"Expected one of: {', '.join(sorted(valid))}"
+        )
 
     positional = [p for p in pairs if not p.team]
-    out: list[tuple[TeamConfig, Pair]] = []
+    out: list[tuple[Target, Pair]] = []
     cursor = 0
-    for team in teams:
-        if team.key in explicit:
-            out.append((team, explicit[team.key]))
+    for target in targets:
+        if target.key in explicit:
+            out.append((target, explicit[target.key]))
         elif cursor < len(positional):
-            out.append((team, positional[cursor]))
+            out.append((target, positional[cursor]))
             cursor += 1
     if cursor < len(positional):
         raise SetupError(
-            f"{len(positional) - cursor} more credential pair(s) than teams to "
-            f"assign them to ({len(teams)})."
+            f"{len(positional) - cursor} more credential pair(s) than accounts "
+            f"to assign them to ({len(targets)})."
         )
     return out
 
 
-def verify(bound: Iterable[tuple[TeamConfig, Pair]]) -> list[Checked]:
+def verify(bound: Iterable[tuple[Target, Pair]]) -> list[Checked]:
     """Hit Alpaca once per pair and report what each account actually is."""
     out: list[Checked] = []
     for team, pair in bound:
@@ -211,30 +263,32 @@ def report(results: Sequence[Checked], *, bankroll: float) -> tuple[list[str], l
         )
 
     good = [c for c in results if not c.fatal]
-    if len(good) > 1:
-        equities = [c.equity for c in good]
-        spread = max(equities) - min(equities)
-        tolerance = max(0.01 * bankroll, 5.0)
+    if good:
         lines.append("")
-        lines.append(
-            f"  balances: ${min(equities):,.2f} .. ${max(equities):,.2f} "
-            f"(spread ${spread:,.2f}, tolerance ${tolerance:,.2f})"
+    for c in good:
+        need = c.team.capital
+        tolerance = max(0.01 * need, 5.0)
+        drift = c.equity - need
+        if abs(drift) <= tolerance:
+            lines.append(f"  funds ok  {c.team.key:<{width}}  ${c.equity:,.2f} "
+                         f"for {len(c.team.teams)} team(s)")
+            continue
+        detail = (
+            f"{c.team.key} holds ${c.equity:,.2f} but its "
+            f"{len(c.team.teams)} team(s) need ${need:,.2f} "
+            f"(${bankroll:,.2f} each)"
         )
-        if spread > tolerance:
+        if c.team.is_group:
             problems.append(
-                f"account balances differ by ${spread:,.2f}. Every team must start "
-                f"from the same bankroll or the round is not comparable -- reset "
-                f"the paper accounts to a common value."
+                detail + ". Recreate that paper account with the right funds: "
+                "teams sharing an account must each get the full bankroll."
             )
-        off = [c for c in good if abs(c.equity - bankroll) > tolerance]
-        if off and spread <= tolerance:
-            lines.append(
-                f"  note: balances are ${good[0].equity:,.2f}, not the "
-                f"${bankroll:,.2f} in the rulebook. That is fine -- every strategy "
-                f"sizes by weight of equity and the order caps scale with the "
-                f"bankroll -- but set `starting_cash` to match so the reports read "
-                f"correctly."
+        else:
+            problems.append(
+                detail + ". Every team must start from the same bankroll or the "
+                "round is not comparable."
             )
+        lines.append(f"  FUNDS     {c.team.key:<{width}}  {detail}")
     return lines, problems
 
 
@@ -275,13 +329,18 @@ def render_env(
         f"ALPACA_DATA_BASE_URL={data_url}",
         f"ALPACA_DATA_FEED={feed}",
         "",
-        "# One paper account per team.",
+        "# One paper account per entry below.",
     ]
     for c in results:
         note = f"   # {c.fatal}" if c.fatal else f"   # account #{c.account_number}"
         out += [
             "",
             f"# {c.team.name}{note}",
+        ]
+        if c.team.is_group:
+            out.append(f"#   holds ${c.team.capital:,.2f} for "
+                       f"{len(c.team.teams)} teams")
+        out += [
             f"{c.team.env_prefix}_KEY_ID={c.pair.key_id}",
             f"{c.team.env_prefix}_SECRET_KEY={c.pair.secret}",
         ]
@@ -296,29 +355,46 @@ def render_template(cfg: CompetitionConfig) -> str:
     to make and nearly invisible afterwards: pasting nine keys one row out, so
     every team trades the account labelled for its neighbour.
     """
+    targets = targets_for(cfg)
+    shared = cfg.accounts.is_shared
+    what = "account group" if shared else "team"
     lines = [
-        "# Alpaca PAPER credentials, one account per team.",
+        f"# Alpaca PAPER credentials: {len(targets)} account(s), "
+        f"one per {what}.",
         "#",
-        "# Each line is:   <team>=<KEY_ID>,<SECRET>",
-        "# The team= prefix binds by name, so the ORDER of these lines does not",
-        "# matter -- you cannot paste them one row out.",
+        f"# Each line is:   <{what.replace(' ', '-')}>=<KEY_ID>,<SECRET>",
+        "# The label before the = binds by name, so the ORDER of these lines",
+        "# does not matter -- you cannot paste them one row out.",
         "#",
-        "# The Alpaca dashboard's Nickname field takes the env prefix shown",
-        "# per team -- naming the account after the variable it fills removes",
-        "# any doubt about which account belongs to which strategy.",
+        "# In the Alpaca dashboard's Open New Paper Account dialog, put the",
+        "# Nickname and Set Funds shown below, and leave 'Sync to your live",
+        "# account balance' UNCHECKED.",
+    ]
+    if shared:
+        lines += [
+            "#",
+            "# These accounts are SHARED: several teams trade inside each one,",
+            "# with a virtual book apiece, so each account must be funded with",
+            "# the whole group's capital. See docs/accounts.md.",
+        ]
+    lines += [
+        "#",
         "# Delete this file once `comp setup-accounts --from-file keys.txt` has",
         "# written .env.",
         "",
     ]
-    for i, team in enumerate(cfg.teams, 1):
-        note = "" if team.scored else "   (unscored reference)"
-        lines += [
-            f"# {i}. {team.name}{note}",
-            f"#    Alpaca Nickname: {team.env_prefix}    Set Funds: "
-            f"{cfg.starting_cash:,.0f}",
-            f"{team.key}=",
-            "",
-        ]
+    for i, target in enumerate(targets_for(cfg), 1):
+        lines.append(f"# {i}. {target.name}")
+        lines.append(
+            f"#    Alpaca Nickname: {target.env_prefix}    "
+            f"Set Funds: {target.capital:,.0f}"
+        )
+        if target.is_group:
+            lines.append(
+                f"#    {len(target.teams)} teams share this account, "
+                f"${cfg.starting_cash:,.0f} each"
+            )
+        lines += [f"{target.key}=", ""]
     return "\n".join(lines)
 
 

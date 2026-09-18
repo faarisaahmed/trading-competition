@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -114,6 +115,91 @@ class RiskConfig:
         """
         return max(self.max_order_notional_x_bankroll * bankroll,
                    self.min_order_notional)
+
+
+@dataclass(frozen=True)
+class AccountGroup:
+    """One real broker account, and the teams that share it."""
+
+    env_prefix: str
+    teams: tuple[str, ...]
+    name: str = ""
+
+    @property
+    def label(self) -> str:
+        return self.name or self.env_prefix
+
+
+@dataclass(frozen=True)
+class AccountsConfig:
+    """How the field maps onto real broker accounts.
+
+    `per_team` gives every team its own Alpaca account -- the strongest
+    isolation, because the broker enforces it. `shared` lets a group of teams
+    share one account with per-team virtual books, which is necessary when
+    Alpaca's three-paper-accounts-per-login cap bites.
+
+    Sharing has real costs, documented in `broker/shared.py`: isolation
+    becomes software-enforced, opposing orders must be crossed internally
+    (Alpaca rejects them as wash trades), and the one team that rests quotes
+    gives way to other teams' market orders. Fewer teams per account means
+    less of all three.
+    """
+
+    mode: str = "per_team"
+    groups: tuple[AccountGroup, ...] = ()
+    #: Net opposing same-symbol intents between teams instead of sending both
+    #: and collecting wash-trade rejections. Off means rejections.
+    cross_internally: bool = True
+
+    @property
+    def is_shared(self) -> bool:
+        return self.mode == "shared"
+
+    def group_for(self, team_key: str) -> AccountGroup | None:
+        for group in self.groups:
+            if team_key in group.teams:
+                return group
+        return None
+
+    def validate(self, team_keys: Sequence[str]) -> None:
+        if self.mode not in ("per_team", "shared"):
+            raise ConfigError("accounts.mode must be per_team|shared")
+        if not self.is_shared:
+            return
+        if not self.groups:
+            raise ConfigError("accounts.mode=shared requires at least one group")
+        seen: dict[str, str] = {}
+        prefixes: set[str] = set()
+        for group in self.groups:
+            if not group.env_prefix:
+                raise ConfigError("every account group needs an env_prefix")
+            if group.env_prefix in prefixes:
+                raise ConfigError(
+                    f"two account groups share the env_prefix "
+                    f"{group.env_prefix} -- they would be the same account"
+                )
+            prefixes.add(group.env_prefix)
+            if not group.teams:
+                raise ConfigError(f"account group {group.label} has no teams")
+            for key in group.teams:
+                if key in seen:
+                    raise ConfigError(
+                        f"team {key} is in two account groups "
+                        f"({seen[key]} and {group.label})"
+                    )
+                seen[key] = group.label
+        unknown = set(seen) - set(team_keys)
+        if unknown:
+            raise ConfigError(
+                f"account groups name unknown team(s): {', '.join(sorted(unknown))}"
+            )
+        missing = set(team_keys) - set(seen)
+        if missing:
+            raise ConfigError(
+                f"team(s) not assigned to any account group: "
+                f"{', '.join(sorted(missing))}"
+            )
 
 
 @dataclass(frozen=True)
@@ -340,6 +426,7 @@ class CompetitionConfig:
     risk: RiskConfig
     fairness: FairnessConfig
     data: DataConfig
+    accounts: AccountsConfig
     rounds: tuple[RoundConfig, ...]
     teams: tuple[TeamConfig, ...]
     source_files: tuple[Path, ...] = ()
@@ -403,6 +490,7 @@ class CompetitionConfig:
         self.risk.validate()
         self.fairness.validate()
         self.data.validate()
+        self.accounts.validate(self.team_keys)
         for t in self.teams:
             t.validate()
         for r in self.rounds:
@@ -453,6 +541,37 @@ def _sub(cls, data: dict[str, Any] | None, *, where: str):
     if unknown:
         raise ConfigError(f"{where}: unknown key(s) {sorted(unknown)}; allowed: {sorted(known)}")
     return cls(**data)
+
+
+def _parse_accounts(raw: dict[str, Any] | None) -> AccountsConfig:
+    raw = dict(raw or {})
+    groups_raw = raw.pop("groups", None) or []
+    known = {"mode", "cross_internally"}
+    unknown = set(raw) - known
+    if unknown:
+        raise ConfigError(
+            f"competition.accounts: unknown key(s) {sorted(unknown)}; "
+            f"allowed: {sorted(known | {'groups'})}"
+        )
+    groups = []
+    for entry in groups_raw:
+        entry = dict(entry or {})
+        allowed = {"env_prefix", "teams", "name"}
+        extra = set(entry) - allowed
+        if extra:
+            raise ConfigError(
+                f"competition.accounts.groups: unknown key(s) {sorted(extra)}"
+            )
+        groups.append(AccountGroup(
+            env_prefix=str(entry.get("env_prefix", "")),
+            teams=tuple(str(t) for t in (entry.get("teams") or ())),
+            name=str(entry.get("name", "")),
+        ))
+    return AccountsConfig(
+        mode=str(raw.get("mode", "per_team")),
+        groups=tuple(groups),
+        cross_internally=bool(raw.get("cross_internally", True)),
+    )
 
 
 def _parse_round(raw: dict[str, Any]) -> RoundConfig:
@@ -533,6 +652,7 @@ def load_config(
         risk=_sub(RiskConfig, block.get("risk"), where="competition.risk"),
         fairness=_sub(FairnessConfig, block.get("fairness"), where="competition.fairness"),
         data=_sub(DataConfig, block.get("data"), where="competition.data"),
+        accounts=_parse_accounts(block.get("accounts")),
         rounds=tuple(_parse_round(r) for r in (comp_raw.get("rounds") or [])),
         teams=tuple(_parse_team(t) for t in (teams_raw.get("teams") or [])),
         source_files=(comp_path, teams_path),

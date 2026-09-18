@@ -68,6 +68,42 @@ competition:
     sim_slippage_bps: 2.0
     sim_commission_per_share: 0.0
 
+  # ---- How the field maps onto real broker accounts -----------------------
+  #
+  # `per_team` is the fairest: every team gets its own Alpaca account and the
+  # BROKER enforces that one team cannot touch another's money. Use it if you
+  # can get nine accounts (three logins x three paper accounts).
+  #
+  # `shared` exists because Alpaca caps paper accounts at three per login.
+  # Teams in a group share one real account, each with its own virtual book.
+  # The costs are real and are documented in src/competition/broker/shared.py:
+  #   * isolation becomes software-enforced rather than broker-enforced;
+  #   * opposing same-symbol orders must be netted and crossed between
+  #     teams at the mid, because Alpaca rejects them as wash trades (403)
+  #     -- even on paper accounts;
+  #   * the one team that rests limit quotes (the scalper) gives way when
+  #     another team in its group needs to send a market order.
+  # Fewer teams per account means less of all three, so three groups of three
+  # is much better than one group of nine.
+  #
+  # The grouping is deliberate, not alphabetical: the scalper is the only team
+  # that rests quotes and therefore the only one a shared account penalises, so
+  # it sits with the two least active teams. The grouping is frozen into the
+  # rules hash, so it cannot be changed mid-season without that being visible.
+  accounts:
+    mode: shared
+    cross_internally: true
+    groups:
+      - name: group-a
+        env_prefix: ALPACA_GROUP_A
+        teams: [scalper, benchmark, mean_reverter]
+      - name: group-b
+        env_prefix: ALPACA_GROUP_B
+        teams: [q_learner, trend_rider, news_hound]
+      - name: group-c
+        env_prefix: ALPACA_GROUP_C
+        teams: [gambler, stat_arb, vol_breakout]
+
   # ---- Market data --------------------------------------------------------
   data:
     feed: iex                    # or "sip" if you have the paid subscription

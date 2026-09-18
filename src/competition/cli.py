@@ -21,13 +21,14 @@ import argparse
 import json
 import logging
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from . import __version__
 from .broker import AlpacaBroker, AlpacaClient, AlpacaCredentials, AlpacaDataReader
 from .broker.base import Broker, BrokerError
+from .broker.shared import SharedAccount
 from .broker.simulated import SimConfig, SimulatedBroker
 from .config import REPO_ROOT, CompetitionConfig, ConfigError, load_config, load_dotenv
 from .data.calendar import MarketCalendar
@@ -257,52 +258,65 @@ def cmd_doctor(args, cfg: CompetitionConfig) -> int:
             "`comp run` does not"
         )
 
-    missing_teams = [t.key for t in cfg.teams if not t.has_credentials]
-    ready_teams = [t.key for t in cfg.teams if t.has_credentials]
-    for team in cfg.teams:
-        state = "keys set" if team.has_credentials else "no keys"
-        _print(f"    {team.key:<14} {team.env_prefix + '_KEY_ID':<32} {state}")
-    if missing_teams:
+    import os as _os
+
+    from .setup import targets_for
+
+    targets = targets_for(cfg)
+    if cfg.accounts.is_shared:
+        _print(f"  account mode: shared -- {len(targets)} real account(s) for "
+               f"{len(cfg.teams)} teams")
+        _print("    teams inside a group share one account, each with its own "
+               "virtual book (docs/accounts.md)")
+    else:
+        _print(f"  account mode: per_team -- {len(targets)} real account(s)")
+
+    missing_targets = []
+    for target in targets:
+        has = bool(_os.environ.get(f"{target.env_prefix}_KEY_ID")
+                   and _os.environ.get(f"{target.env_prefix}_SECRET_KEY"))
+        if not has:
+            missing_targets.append(target.key)
+        _print(f"    {target.key:<14} {target.env_prefix + '_KEY_ID':<26} "
+               f"{'keys set' if has else 'no keys':<9} needs ${target.capital:,.2f}")
+    if missing_targets:
         warnings.append(
-            f"{len(missing_teams)} team(s) without keys ({', '.join(missing_teams)}); "
-            f"they can only run in sim mode"
+            f"{len(missing_targets)} account(s) without keys "
+            f"({', '.join(missing_targets)}); run `comp setup-accounts`"
         )
 
-    if args.check_accounts and ready_teams:
+    if args.check_accounts and not missing_targets:
         _print("\n-- live account check ---------------------------------------------")
-        equities = {}
-        for team in cfg.teams:
-            if not team.has_credentials:
-                continue
+        for target in targets:
             try:
-                client = AlpacaClient(AlpacaCredentials.from_env(team.env_prefix))
+                client = AlpacaClient(AlpacaCredentials.from_env(target.env_prefix))
                 info = client.verify()
-                equities[team.key] = info["equity"]
-                flags = []
-                if not info["paper"]:
-                    flags.append("LIVE ACCOUNT (!)")
-                    problems.append(f"{team.key} is pointed at a LIVE account, not paper")
-                if info["trading_blocked"]:
-                    flags.append("trading blocked")
-                    problems.append(f"{team.key}: trading is blocked on this account")
-                _print(f"  {team.key:<14} #{info['account_number']:<12} "
-                       f"equity ${info['equity']:>10,.2f} cash ${info['cash']:>10,.2f} "
-                       f"{' '.join(flags)}")
             except BrokerError as e:
-                problems.append(f"{team.key}: credential check failed -- {e}")
-                _print(f"  {team.key:<14} FAILED: {e}")
-        if len(equities) > 1:
-            lo, hi = min(equities.values()), max(equities.values())
-            spread = hi - lo
-            _print(f"\n  equity spread across {len(equities)} accounts: "
-                   f"${spread:,.2f} (${lo:,.2f} .. ${hi:,.2f})")
-            tolerance = max(0.01 * cfg.starting_cash, 5.0)
-            if spread > tolerance:
+                problems.append(f"{target.key}: credential check failed -- {e}")
+                _print(f"  {target.key:<14} FAILED: {e}")
+                continue
+            flags = []
+            if not info["paper"]:
+                flags.append("LIVE ACCOUNT (!)")
                 problems.append(
-                    f"accounts differ by ${spread:,.2f}, more than the ${tolerance:,.2f} "
-                    f"tolerance. Unequal bankrolls make the round unfair -- reset the "
-                    f"paper accounts before starting."
+                    f"{target.key} is pointed at a LIVE account, not paper")
+            if info["trading_blocked"]:
+                flags.append("trading blocked")
+                problems.append(f"{target.key}: trading is blocked")
+            equity = info["equity"]
+            need = target.capital
+            tolerance = max(0.01 * need, 5.0)
+            if abs(equity - need) > tolerance:
+                flags.append(f"NEEDS ${need:,.2f}")
+                problems.append(
+                    f"{target.key} holds ${equity:,.2f} but its "
+                    f"{len(target.teams)} team(s) need ${need:,.2f} "
+                    f"(${cfg.starting_cash:,.2f} each). Every team must start from "
+                    f"the same bankroll or the round is not comparable."
                 )
+            _print(f"  {target.key:<14} #{info['account_number']:<12} "
+                   f"equity ${equity:>11,.2f}  needs ${need:>11,.2f}  "
+                   f"{' '.join(flags)}")
 
     _print("\n" + "=" * 68)
     for w in warnings:
@@ -744,11 +758,42 @@ def cmd_backtest(args, cfg: CompetitionConfig) -> int:
         fractional=True,
         allow_short=cfg.risk.allow_short,
     )
-    brokers: dict[str, Broker] = {
-        t.key: SimulatedBroker(cfg.starting_cash, quote_source, name=f"sim:{t.key}",
-                               config=sim_cfg, clock=clock)
-        for t in teams
-    }
+
+    def sim_price(symbol: str) -> float:
+        quote = quote_source(symbol)
+        return quote.mid if quote is not None else 0.0
+
+    shared_accounts: list[SharedAccount] = []
+    brokers: dict[str, Broker] = {}
+    if cfg.accounts.is_shared:
+        # Mirror the live topology, so the dry run exercises the same broker
+        # layer -- internal crossing included -- that the round will use.
+        for group in cfg.accounts.groups:
+            members = [t.key for t in teams if t.key in group.teams]
+            if not members:
+                continue
+            pooled = SimulatedBroker(
+                cfg.starting_cash * len(members), quote_source,
+                name=f"sim:{group.label}", config=sim_cfg, clock=clock,
+            )
+            shared = SharedAccount(
+                pooled, members, bankroll=cfg.starting_cash,
+                price_of=sim_price, quote_of=quote_source,
+                cross_internally=cfg.accounts.cross_internally,
+                name=group.label,
+            )
+            shared_accounts.append(shared)
+            for key in members:
+                brokers[key] = shared.virtual_broker(key)
+        _print(f"  accounts : {len(shared_accounts)} shared group(s), "
+               f"{cfg.starting_cash * 3:,.0f} each, internal crossing "
+               f"{'on' if cfg.accounts.cross_internally else 'off'}")
+    else:
+        brokers = {
+            t.key: SimulatedBroker(cfg.starting_cash, quote_source,
+                                   name=f"sim:{t.key}", config=sim_cfg, clock=clock)
+            for t in teams
+        }
 
     ledger = Ledger(args.ledger)
     ledger.start_run(
@@ -768,6 +813,8 @@ def cmd_backtest(args, cfg: CompetitionConfig) -> int:
         mode="backtest", teams=teams, clock=clock,
         equity_snapshot_seconds=args.equity_every,
     )
+    if shared_accounts:
+        engine.shared_accounts = list(shared_accounts)
     if args.resume_learning:
         engine.load_learned_state()
     _attach_dashboard(engine, cfg, args)
@@ -818,6 +865,18 @@ def cmd_backtest(args, cfg: CompetitionConfig) -> int:
         for hand in result.draft["hands"]:
             _print(f"  {hand['team']:<14} sum={hand['rank_sum']} "
                    f"{', '.join(hand['symbols'])}")
+    if shared_accounts:
+        _print("\n-- shared accounts -----------------------------------------------")
+        for shared in shared_accounts:
+            report = shared.reconcile()
+            summary = shared.summary()
+            _print(f"  {shared.name:<9} {report.describe()}")
+            _print(f"  {'':<9} crossed ${summary['crossed_notional']:,.0f} "
+                   f"internally, {summary['forced_cancels']} forced cancel(s), "
+                   f"{summary['wash_rejections']} wash rejection(s)")
+            for key, book in summary["books"].items():
+                _print(f"  {'':<9}   {key:<14} crossed "
+                       f"${book['crossed_notional']:>10,.0f}")
     if args.dashboard:
         from .reporting import write_dashboard
         out = write_dashboard(cfg, args.dashboard, engine=engine,
@@ -859,32 +918,91 @@ def cmd_run(args, cfg: CompetitionConfig) -> int:
     _print(f"  bankroll: ${cfg.starting_cash:,.2f} each")
     _print(f"  rules   : {cfg.rules_hash}")
 
+    shared_accounts: list[SharedAccount] = []
     brokers: dict[str, Broker] = {}
-    for team in teams:
-        try:
-            brokers[team.key] = AlpacaBroker.from_env(team.env_prefix, name=team.key)
-        except BrokerError as e:
-            _print(f"ERROR: {team.key}: {e}")
-            return 1
+    price_holder: dict[str, Callable[[str], float]] = {"fn": lambda _s: 0.0}
+    # Order sizing must use the actual touch, not the mid, or every book
+    # overspends by the half spread. Both are late-bound to the shared feed.
+    quote_holder: dict[str, Callable[[str], object]] = {"fn": lambda _s: None}
+
+    if cfg.accounts.is_shared:
+        # One real account per group, partitioned into per-team virtual books.
+        # The marking price source is late-bound: the shared feed does not
+        # exist yet, and is wired in below.
+        def price_of(symbol: str) -> float:
+            return price_holder["fn"](symbol)
+
+        for group in cfg.accounts.groups:
+            members = [t.key for t in teams if t.key in group.teams]
+            if not members:
+                continue
+            try:
+                real = AlpacaBroker.from_env(group.env_prefix, name=group.label)
+            except BrokerError as e:
+                _print(f"ERROR: account group {group.label}: {e}")
+                return 1
+            shared = SharedAccount(
+                real, members, bankroll=cfg.starting_cash, price_of=price_of,
+                quote_of=quote_holder["fn"],
+                cross_internally=cfg.accounts.cross_internally,
+                name=group.label,
+            )
+            shared_accounts.append(shared)
+            for key in members:
+                brokers[key] = shared.virtual_broker(key)
+        _print(f"  accounts: {len(shared_accounts)} shared "
+               f"({', '.join(s.name for s in shared_accounts)}), "
+               f"internal crossing "
+               f"{'on' if cfg.accounts.cross_internally else 'OFF'}")
+    else:
+        for team in teams:
+            try:
+                brokers[team.key] = AlpacaBroker.from_env(team.env_prefix,
+                                                          name=team.key)
+            except BrokerError as e:
+                _print(f"ERROR: {team.key}: {e}")
+                return 1
 
     # Refuse to start with unequal bankrolls -- that is the one condition that
     # invalidates the whole round.
-    equities = {}
-    for key, broker in brokers.items():
-        try:
-            equities[key] = broker.account(fresh=True).equity
-        except BrokerError as e:
-            _print(f"ERROR: {key}: cannot read the account -- {e}")
+    if shared_accounts:
+        # Each shared account must hold its group's whole capital, or the
+        # teams inside it cannot all be funded to the same bankroll.
+        for shared in shared_accounts:
+            need = shared.required_capital()
+            try:
+                have = shared.broker.account(fresh=True).equity
+            except BrokerError as e:
+                _print(f"ERROR: {shared.name}: cannot read the account -- {e}")
+                return 1
+            _print(f"  {shared.name:<9} ${have:>12,.2f} held, ${need:>12,.2f} "
+                   f"needed for {len(shared.books)} team(s)")
+            if abs(have - need) > max(0.01 * need, 5.0) and not args.force:
+                _print(
+                    f"\nERROR: {shared.name} holds ${have:,.2f} but its "
+                    f"{len(shared.books)} teams need ${need:,.2f} "
+                    f"(${cfg.starting_cash:,.2f} each). Recreate that paper "
+                    f"account with ${need:,.2f} of funds, or pass --force."
+                )
+                return 1
+    else:
+        equities = {}
+        for key, broker in brokers.items():
+            try:
+                equities[key] = broker.account(fresh=True).equity
+            except BrokerError as e:
+                _print(f"ERROR: {key}: cannot read the account -- {e}")
+                return 1
+        spread = (max(equities.values()) - min(equities.values())
+                  if equities else 0.0)
+        tolerance = max(0.01 * cfg.starting_cash, 5.0)
+        _print("  equity  : " + ", ".join(f"{k}=${v:,.2f}"
+                                          for k, v in equities.items()))
+        if spread > tolerance and not args.force:
+            _print(f"\nERROR: account equities differ by ${spread:,.2f} "
+                   f"(tolerance ${tolerance:,.2f}). Reset the paper accounts so "
+                   f"every team starts from the same bankroll, or pass --force.")
             return 1
-    spread = max(equities.values()) - min(equities.values()) if equities else 0.0
-    tolerance = max(0.01 * cfg.starting_cash, 5.0)
-    _print("  equity  : " + ", ".join(f"{k}=${v:,.2f}" for k, v in equities.items()))
-    if spread > tolerance and not args.force:
-        _print(f"\nERROR: account equities differ by ${spread:,.2f} (tolerance "
-               f"${tolerance:,.2f}). Reset the paper accounts so every team starts "
-               f"from the same bankroll, or pass --force to accept the difference "
-               f"(round P&L is measured per-account either way).")
-        return 1
 
     # ---- is there an interrupted round to rejoin? ----------------------- #
     probe = Ledger(args.ledger)
@@ -975,6 +1093,40 @@ def cmd_run(args, cfg: CompetitionConfig) -> int:
         is_tradable=provider.is_tradable, is_fractionable=provider.is_fractionable,
         equity_snapshot_seconds=args.equity_every,
     )
+    if shared_accounts:
+        # Mark the virtual books off the same feed every strategy reads, so a
+        # team's equity is computed from the same prices it trades on.
+        last_price: dict[str, float] = {}
+
+        def feed_price(symbol: str) -> float:
+            try:
+                price = feed.snapshot([symbol]).price(symbol)
+            except Exception:  # noqa: BLE001 -- marking must never raise
+                price = 0.0
+            if price > 0:
+                last_price[symbol] = price
+            return price or last_price.get(symbol, 0.0)
+
+        def feed_quote(symbol: str):
+            try:
+                return feed.snapshot([symbol]).quote(symbol)
+            except Exception:  # noqa: BLE001 -- sizing must never raise
+                return None
+
+        price_holder["fn"] = feed_price
+        for shared in shared_accounts:
+            shared.quote_of = feed_quote
+        engine.shared_accounts = list(shared_accounts)
+        if resume is not None:
+            # The per-team split lives only in this process, so unlike real
+            # accounts it must be restored from the checkpoint or it is lost.
+            for shared in shared_accounts:
+                saved = ledger.load_learned_state(shared.name, "shared_books")
+                if saved:
+                    shared.load(saved)
+                    _print(f"  restored {shared.name}: {len(shared.books)} "
+                           f"virtual book(s) from the checkpoint")
+
     engine.load_learned_state()
     _attach_dashboard(engine, cfg, args)
 

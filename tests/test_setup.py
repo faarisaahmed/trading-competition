@@ -13,6 +13,7 @@ import stat
 import pytest
 
 from competition.broker.base import BrokerError
+from competition.config import AccountsConfig
 from competition.setup import (
     Checked,
     Pair,
@@ -23,6 +24,7 @@ from competition.setup import (
     render_env,
     render_template,
     report,
+    targets_for,
     verify,
     write_env,
 )
@@ -94,45 +96,111 @@ def test_empty_input_is_empty_not_an_error():
 
 
 # --------------------------------------------------------------------------- #
+# account targets: one credential pair per REAL account
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def per_team_cfg(cfg):
+    """The same rulebook, but with one Alpaca account per team."""
+    import dataclasses
+    return dataclasses.replace(
+        cfg, accounts=AccountsConfig(mode="per_team", groups=()))
+
+
+@pytest.fixture
+def shared_cfg(cfg):
+    """Three accounts of three teams -- the shipped default."""
+    assert cfg.accounts.is_shared, "the rulebook is expected to ship shared"
+    return cfg
+
+
+def test_per_team_mode_needs_one_account_per_team(per_team_cfg):
+    targets = targets_for(per_team_cfg)
+    assert len(targets) == len(per_team_cfg.teams)
+    assert all(not t.is_group for t in targets)
+    assert all(t.capital == per_team_cfg.starting_cash for t in targets)
+
+
+def test_shared_mode_needs_one_account_per_group(shared_cfg):
+    targets = targets_for(shared_cfg)
+    assert len(targets) == len(shared_cfg.accounts.groups) == 3
+    assert all(t.is_group for t in targets)
+    # Each account must hold the whole group's capital.
+    for target in targets:
+        assert target.capital == pytest.approx(
+            shared_cfg.starting_cash * len(target.teams))
+    # And every team is covered exactly once.
+    covered = [k for t in targets for k in t.teams]
+    assert sorted(covered) == sorted(shared_cfg.team_keys)
+
+
+def test_shared_targets_total_the_whole_field(shared_cfg):
+    targets = targets_for(shared_cfg)
+    total = sum(t.capital for t in targets)
+    assert total == pytest.approx(shared_cfg.starting_cash * len(shared_cfg.teams))
+
+
+# --------------------------------------------------------------------------- #
 # assignment
 # --------------------------------------------------------------------------- #
 
 
-def test_assigns_positionally_in_roster_order(cfg):
-    pairs = [Pair(f"PK{i:020d}", f"secret{i:022d}") for i in range(len(cfg.teams))]
-    bound = assign(cfg, pairs)
-    assert [t.key for t, _p in bound] == list(cfg.team_keys)
+def _pairs(n):
+    return [Pair(f"PK{i:020d}", f"secret{i:022d}") for i in range(n)]
 
 
-def test_explicit_assignment_wins(cfg):
-    pairs = [Pair(KEY1, SEC1, "gambler"), Pair(KEY2, SEC2)]
-    bound = dict((t.key, p) for t, p in assign(cfg, pairs))
-    assert bound["gambler"].key_id == KEY1
-    # The positional pair went to the first team that was not claimed.
-    assert bound[cfg.team_keys[0]].key_id == KEY2
+def test_assigns_positionally_in_target_order(shared_cfg):
+    targets = targets_for(shared_cfg)
+    bound = assign(shared_cfg, _pairs(len(targets)))
+    assert [t.key for t, _p in bound] == [t.key for t in targets]
 
 
-def test_rejects_an_unknown_team_key(cfg):
-    with pytest.raises(SetupError, match="unknown team"):
-        assign(cfg, [Pair(KEY1, SEC1, "nonexistent")])
+def test_assigns_per_team_when_configured(per_team_cfg):
+    bound = assign(per_team_cfg, _pairs(len(per_team_cfg.teams)))
+    assert [t.key for t, _p in bound] == list(per_team_cfg.team_keys)
 
 
-def test_rejects_more_pairs_than_teams(cfg):
-    pairs = [Pair(f"PK{i:020d}", f"secret{i:022d}")
-             for i in range(len(cfg.teams) + 2)]
+def test_explicit_labels_bind_by_name(shared_cfg):
+    pairs = parse_pairs(f"group-c={KEY1},{SEC1}\ngroup-a={KEY2},{SEC2}")
+    bound = dict((t.key, p.key_id) for t, p in assign(shared_cfg, pairs))
+    assert bound["group-c"] == KEY1
+    assert bound["group-a"] == KEY2
+
+
+def test_labelled_pairs_bind_by_name_not_position(shared_cfg):
+    """The error the template exists to prevent: everything one row out."""
+    pairs = parse_pairs(
+        f"group-b={KEY1},{SEC1}\n"
+        f"group-a={KEY2},{SEC2}\n"      # deliberately reversed
+    )
+    bound = dict((t.key, p.key_id) for t, p in assign(shared_cfg, pairs))
+    assert bound["group-b"] == KEY1
+    assert bound["group-a"] == KEY2
+
+
+def test_rejects_an_unknown_account_key(shared_cfg):
+    with pytest.raises(SetupError, match="unknown account"):
+        assign(shared_cfg, [Pair(KEY1, SEC1, "nonexistent")])
+
+
+def test_rejects_more_pairs_than_accounts(shared_cfg):
+    n = len(targets_for(shared_cfg))
     with pytest.raises(SetupError, match="more credential pair"):
-        assign(cfg, pairs)
+        assign(shared_cfg, _pairs(n + 2))
 
 
-def test_can_limit_to_specific_teams(cfg):
-    bound = assign(cfg, [Pair(KEY1, SEC1)], only=["gambler"])
-    assert [t.key for t, _p in bound] == ["gambler"]
-
-
-def test_fewer_pairs_than_teams_binds_a_prefix(cfg):
-    bound = assign(cfg, [Pair(KEY1, SEC1), Pair(KEY2, SEC2)])
+def test_fewer_pairs_than_accounts_binds_a_prefix(shared_cfg):
+    bound = assign(shared_cfg, _pairs(2))
     assert len(bound) == 2
-    assert [t.key for t, _p in bound] == list(cfg.team_keys[:2])
+    assert [t.key for t, _p in bound] == [t.key for t in targets_for(shared_cfg)][:2]
+
+
+def test_can_limit_to_specific_teams(shared_cfg):
+    """Limiting to one team narrows to the account that team lives in."""
+    bound = assign(shared_cfg, [Pair(KEY1, SEC1)], only=["gambler"])
+    assert len(bound) == 1
+    assert "gambler" in bound[0][0].teams
 
 
 # --------------------------------------------------------------------------- #
@@ -140,22 +208,25 @@ def test_fewer_pairs_than_teams_binds_a_prefix(cfg):
 # --------------------------------------------------------------------------- #
 
 
+def _target(cfg, key=None):
+    targets = targets_for(cfg)
+    if key is None:
+        return targets[0]
+    return next(t for t in targets if t.key == key)
+
+
 def _fake_verify(monkeypatch, responses):
     """Patch AlpacaClient.verify to return canned account info per key id."""
-    calls = []
-
     def fake(self):
-        calls.append(self.creds.key_id)
         result = responses.get(self.creds.key_id)
         if isinstance(result, Exception):
             raise result
         return result
 
     monkeypatch.setattr("competition.setup.AlpacaClient.verify", fake)
-    return calls
 
 
-def _good(equity=5000.0, **over):
+def _good(equity=15000.0, **over):
     base = dict(account_number="PA123", status="ACTIVE", equity=equity,
                 cash=equity, paper=True, currency="USD",
                 pattern_day_trader=False, shorting_enabled=False,
@@ -166,42 +237,38 @@ def _good(equity=5000.0, **over):
 
 def test_verifies_a_good_pair(cfg, monkeypatch):
     _fake_verify(monkeypatch, {KEY1: _good()})
-    team = cfg.team("gambler")
-    result = verify([(team, Pair(KEY1, SEC1))])[0]
+    result = verify([(_target(cfg), Pair(KEY1, SEC1))])[0]
     assert result.ok and result.paper and not result.fatal
-    assert result.equity == 5000.0
+    assert result.equity == 15000.0
 
 
 def test_a_live_account_is_fatal(cfg, monkeypatch):
     """The single most important check: never trade real money."""
     _fake_verify(monkeypatch, {KEY1: _good(paper=False)})
-    result = verify([(cfg.team("gambler"), Pair(KEY1, SEC1))])[0]
+    result = verify([(_target(cfg), Pair(KEY1, SEC1))])[0]
     assert "LIVE account" in result.fatal
 
 
 def test_blocked_trading_is_fatal(cfg, monkeypatch):
     _fake_verify(monkeypatch, {KEY1: _good(trading_blocked=True)})
-    result = verify([(cfg.team("gambler"), Pair(KEY1, SEC1))])[0]
-    assert "blocked" in result.fatal
+    assert "blocked" in verify([(_target(cfg), Pair(KEY1, SEC1))])[0].fatal
 
 
 def test_a_non_active_status_is_fatal(cfg, monkeypatch):
     _fake_verify(monkeypatch, {KEY1: _good(status="ACCOUNT_CLOSED")})
-    result = verify([(cfg.team("gambler"), Pair(KEY1, SEC1))])[0]
-    assert "ACCOUNT_CLOSED" in result.fatal
+    assert "ACCOUNT_CLOSED" in verify([(_target(cfg), Pair(KEY1, SEC1))])[0].fatal
 
 
 def test_a_bad_key_is_reported_not_raised(cfg, monkeypatch):
     _fake_verify(monkeypatch, {KEY1: BrokerError("HTTP 401 unauthorized")})
-    result = verify([(cfg.team("gambler"), Pair(KEY1, SEC1))])[0]
+    result = verify([(_target(cfg), Pair(KEY1, SEC1))])[0]
     assert not result.ok and "401" in result.fatal
 
 
 def test_error_text_is_truncated(cfg, monkeypatch):
     """An Alpaca error body can echo a key, so it is clipped."""
     _fake_verify(monkeypatch, {KEY1: BrokerError("x" * 900)})
-    result = verify([(cfg.team("gambler"), Pair(KEY1, SEC1))])[0]
-    assert len(result.error) <= 160
+    assert len(verify([(_target(cfg), Pair(KEY1, SEC1))])[0].error) <= 160
 
 
 # --------------------------------------------------------------------------- #
@@ -209,8 +276,8 @@ def test_error_text_is_truncated(cfg, monkeypatch):
 # --------------------------------------------------------------------------- #
 
 
-def _checked(cfg, key, equity, **over):
-    base = dict(team=cfg.team(key), pair=Pair(KEY1, SEC1), ok=True,
+def _checked(cfg, equity, key=None, **over):
+    base = dict(team=_target(cfg, key), pair=Pair(KEY1, SEC1), ok=True,
                 account_number="PA1", equity=equity, cash=equity, paper=True,
                 status="ACTIVE")
     base.update(over)
@@ -218,40 +285,49 @@ def _checked(cfg, key, equity, **over):
 
 
 def test_report_never_prints_a_secret(cfg):
-    results = [_checked(cfg, "gambler", 5000.0)]
-    lines, _ = report(results, bankroll=5000.0)
+    lines, _ = report([_checked(cfg, 15000.0)], bankroll=cfg.starting_cash)
     body = "\n".join(lines)
     assert SEC1 not in body
     assert KEY1 not in body           # the full key id is masked too
     assert mask(KEY1) in body
 
 
-def test_report_flags_unequal_balances(cfg):
-    results = [_checked(cfg, "gambler", 5000.0),
-               _checked(cfg, "scalper", 7500.0)]
-    _lines, problems = report(results, bankroll=5000.0)
-    assert any("differ" in p for p in problems)
-
-
-def test_report_accepts_equal_balances(cfg):
-    results = [_checked(cfg, "gambler", 5000.0),
-               _checked(cfg, "scalper", 5000.0)]
-    _lines, problems = report(results, bankroll=5000.0)
+def test_report_accepts_correctly_funded_accounts(shared_cfg):
+    results = [_checked(shared_cfg, t.capital, t.key)
+               for t in targets_for(shared_cfg)]
+    _lines, problems = report(results, bankroll=shared_cfg.starting_cash)
     assert problems == []
 
 
-def test_report_notes_a_non_matching_but_equal_bankroll(cfg):
-    """$100k accounts are fine -- sizing is by weight -- but say so."""
-    results = [_checked(cfg, "gambler", 100_000.0),
-               _checked(cfg, "scalper", 100_000.0)]
-    lines, problems = report(results, bankroll=5000.0)
-    assert problems == []
-    assert any("not the $5,000" in ln for ln in lines)
+def test_report_flags_an_underfunded_shared_account(shared_cfg):
+    """A group account funded for one team starves the other two."""
+    results = [_checked(shared_cfg, shared_cfg.starting_cash, t.key)
+               for t in targets_for(shared_cfg)]
+    lines, problems = report(results, bankroll=shared_cfg.starting_cash)
+    assert problems, "an underfunded group account was accepted"
+    assert any("need" in p for p in problems)
+    assert any("FUNDS" in ln for ln in lines)
+
+
+def test_report_flags_an_overfunded_account(shared_cfg):
+    results = [_checked(shared_cfg, t.capital * 3, t.key)
+               for t in targets_for(shared_cfg)]
+    _lines, problems = report(results, bankroll=shared_cfg.starting_cash)
+    assert problems
+
+
+def test_report_flags_unequal_per_team_accounts(per_team_cfg):
+    targets = targets_for(per_team_cfg)
+    results = [_checked(per_team_cfg, per_team_cfg.starting_cash, targets[0].key),
+               _checked(per_team_cfg, per_team_cfg.starting_cash * 2,
+                        targets[1].key)]
+    _lines, problems = report(results, bankroll=per_team_cfg.starting_cash)
+    assert problems and any("same bankroll" in p for p in problems)
 
 
 def test_report_surfaces_fatal_rows(cfg):
-    results = [_checked(cfg, "gambler", 5000.0, paper=False)]
-    lines, problems = report(results, bankroll=5000.0)
+    lines, problems = report([_checked(cfg, 15000.0, paper=False)],
+                             bankroll=cfg.starting_cash)
     assert any("FAIL" in ln for ln in lines)
     assert problems and "LIVE" in problems[0]
 
@@ -261,26 +337,36 @@ def test_report_surfaces_fatal_rows(cfg):
 # --------------------------------------------------------------------------- #
 
 
-def test_env_body_contains_every_team(cfg):
-    results = [_checked(cfg, t.key, 5000.0) for t in cfg.teams]
+def test_env_body_contains_every_account(cfg):
+    results = [_checked(cfg, t.capital, t.key) for t in targets_for(cfg)]
     body = render_env(results)
-    for team in cfg.teams:
-        assert f"{team.env_prefix}_KEY_ID={KEY1}" in body
-        assert f"{team.env_prefix}_SECRET_KEY={SEC1}" in body
+    for target in targets_for(cfg):
+        assert f"{target.env_prefix}_KEY_ID={KEY1}" in body
+        assert f"{target.env_prefix}_SECRET_KEY={SEC1}" in body
     assert "ALPACA_DATA_KEY_ID=" in body
     assert "ALPACA_TRADING_BASE_URL=https://paper-api.alpaca.markets" in body
 
 
+def test_env_records_which_teams_share_an_account(shared_cfg):
+    results = [_checked(shared_cfg, t.capital, t.key)
+               for t in targets_for(shared_cfg)]
+    body = render_env(results)
+    assert "teams" in body and "holds $" in body
+
+
 def test_shared_data_keys_can_be_chosen(cfg):
-    results = [_checked(cfg, "gambler", 5000.0),
-               Checked(team=cfg.team("scalper"), pair=Pair(KEY2, SEC2), ok=True,
-                       paper=True, status="ACTIVE", equity=5000.0)]
-    body = render_env(results, data_from="scalper")
+    targets = targets_for(cfg)
+    results = [
+        _checked(cfg, targets[0].capital, targets[0].key),
+        Checked(team=targets[1], pair=Pair(KEY2, SEC2), ok=True, paper=True,
+                status="ACTIVE", equity=targets[1].capital),
+    ]
+    body = render_env(results, data_from=targets[1].key)
     assert f"ALPACA_DATA_KEY_ID={KEY2}" in body
 
 
 def test_written_env_is_owner_only(cfg, tmp_path):
-    results = [_checked(cfg, t.key, 5000.0) for t in cfg.teams]
+    results = [_checked(cfg, t.capital, t.key) for t in targets_for(cfg)]
     target, backup = write_env(render_env(results), tmp_path / ".env")
     assert backup is None
     mode = stat.S_IMODE(target.stat().st_mode)
@@ -290,33 +376,27 @@ def test_written_env_is_owner_only(cfg, tmp_path):
 def test_existing_env_is_backed_up(cfg, tmp_path):
     path = tmp_path / ".env"
     path.write_text("OLD=content\n")
-    results = [_checked(cfg, t.key, 5000.0) for t in cfg.teams]
-    target, backup = write_env(render_env(results), path)
-    assert backup is not None and backup.exists()
-    assert backup.read_text() == "OLD=content\n"
-    assert "OLD=content" not in target.read_text()
+    results = [_checked(cfg, t.capital, t.key) for t in targets_for(cfg)]
+    written, backup = write_env(render_env(results), path)
+    assert backup is not None and backup.read_text() == "OLD=content\n"
+    assert "OLD=content" not in written.read_text()
 
 
 def test_written_env_round_trips_through_the_loader(cfg, tmp_path, monkeypatch):
     """What we write must be what `load_dotenv` reads back."""
+    import os
+
     from competition.config import load_dotenv
 
-    results = [_checked(cfg, t.key, 5000.0) for t in cfg.teams]
-    target, _ = write_env(render_env(results), tmp_path / ".env")
-    for team in cfg.teams:
-        monkeypatch.delenv(f"{team.env_prefix}_KEY_ID", raising=False)
-        monkeypatch.delenv(f"{team.env_prefix}_SECRET_KEY", raising=False)
-    loaded = load_dotenv(target, override=True)
-    for team in cfg.teams:
-        assert loaded[f"{team.env_prefix}_KEY_ID"] == KEY1
-        assert loaded[f"{team.env_prefix}_SECRET_KEY"] == SEC1
-        assert team.has_credentials
-
-
-def test_masking():
-    assert mask(KEY1).startswith("PKAA") and mask(KEY1).endswith("1111")
-    assert KEY1 not in mask(KEY1)
-    assert mask("short") == "…"
+    results = [_checked(cfg, t.capital, t.key) for t in targets_for(cfg)]
+    written, _ = write_env(render_env(results), tmp_path / ".env")
+    for target in targets_for(cfg):
+        monkeypatch.delenv(f"{target.env_prefix}_KEY_ID", raising=False)
+        monkeypatch.delenv(f"{target.env_prefix}_SECRET_KEY", raising=False)
+    loaded = load_dotenv(written, override=True)
+    for target in targets_for(cfg):
+        assert loaded[f"{target.env_prefix}_KEY_ID"] == KEY1
+        assert os.environ[f"{target.env_prefix}_SECRET_KEY"] == SEC1
 
 
 # --------------------------------------------------------------------------- #
@@ -324,15 +404,20 @@ def test_masking():
 # --------------------------------------------------------------------------- #
 
 
-def test_template_lists_every_team_in_order(cfg):
+def test_template_lists_every_account(cfg):
     body = render_template(cfg)
-    for i, team in enumerate(cfg.teams, 1):
-        assert f"{i}. {team.name}" in body
-        assert f"\n{team.key}=" in body
-        # The dashboard Nickname to use is the env prefix, so the account is
-        # named after the variable it fills.
-        assert f"Nickname: {team.env_prefix}" in body
-    assert f"Set Funds: {cfg.starting_cash:,.0f}" in body
+    for i, target in enumerate(targets_for(cfg), 1):
+        assert f"{i}. {target.name}" in body
+        assert f"\n{target.key}=" in body
+        assert f"Nickname: {target.env_prefix}" in body
+        assert f"Set Funds: {target.capital:,.0f}" in body
+
+
+def test_template_warns_when_accounts_are_shared(shared_cfg):
+    body = render_template(shared_cfg)
+    assert "SHARED" in body
+    assert "virtual book" in body
+    assert "UNCHECKED" in body
 
 
 def test_template_parses_back_once_filled(cfg):
@@ -345,17 +430,13 @@ def test_template_parses_back_once_filled(cfg):
         else:
             filled.append(line)
     pairs = parse_pairs("\n".join(filled))
-    assert len(pairs) == len(cfg.teams)
-    assert {p.team for p in pairs} == set(cfg.team_keys)
-    assert [t.key for t, _p in assign(cfg, pairs)] == list(cfg.team_keys)
+    targets = targets_for(cfg)
+    assert len(pairs) == len(targets)
+    assert {p.team for p in pairs} == {t.key for t in targets}
+    assert [t.key for t, _p in assign(cfg, pairs)] == [t.key for t in targets]
 
 
-def test_labelled_pairs_bind_by_name_not_position(cfg):
-    """The error the template exists to prevent: everything one row out."""
-    pairs = parse_pairs(
-        f"gambler={KEY1},{SEC1}\n"
-        f"trend_rider={KEY2},{SEC2}\n"      # deliberately reversed
-    )
-    bound = dict((t.key, p.key_id) for t, p in assign(cfg, pairs))
-    assert bound["gambler"] == KEY1
-    assert bound["trend_rider"] == KEY2
+def test_masking():
+    assert mask(KEY1).startswith("PKAA") and mask(KEY1).endswith("1111")
+    assert KEY1 not in mask(KEY1)
+    assert mask("short") == "\u2026"
