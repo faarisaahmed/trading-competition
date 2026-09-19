@@ -253,3 +253,64 @@ def test_backtest_with_alpaca_source_and_no_keys(capsys, tmp_path, monkeypatch):
              tmp_path / "l.sqlite")
     assert rc == 1
     assert "synthetic" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------- #
+# where the credentials live
+# --------------------------------------------------------------------------- #
+
+
+def test_shared_mode_finds_credentials_on_the_group(cfg, monkeypatch):
+    """The bug that would have stopped the season at the opening bell.
+
+    In shared mode the keys belong to the account group, not to the team.
+    Asking each team whether it has credentials reports all nine unfunded
+    even when all three accounts are set up perfectly.
+    """
+    from competition.cli import _funded_teams
+
+    assert cfg.accounts.is_shared, "this test is about shared mode"
+    for group in cfg.accounts.groups:
+        monkeypatch.setenv(f"{group.env_prefix}_KEY_ID", "PK" + "A" * 18)
+        monkeypatch.setenv(f"{group.env_prefix}_SECRET_KEY", "s" * 40)
+
+    funded = _funded_teams(cfg, cfg.teams)
+    assert funded == set(cfg.team_keys), "every team in a funded group can trade"
+
+
+def test_shared_mode_an_unfunded_group_grounds_only_its_own_teams(cfg, monkeypatch):
+    from competition.cli import _funded_teams
+
+    groups = list(cfg.accounts.groups)
+    for group in groups[:-1]:
+        monkeypatch.setenv(f"{group.env_prefix}_KEY_ID", "PK" + "A" * 18)
+        monkeypatch.setenv(f"{group.env_prefix}_SECRET_KEY", "s" * 40)
+
+    funded = _funded_teams(cfg, cfg.teams)
+    assert funded and not (set(groups[-1].teams) & funded)
+    for group in groups[:-1]:
+        assert set(group.teams) <= funded
+
+
+def test_shared_mode_half_a_key_pair_does_not_count(cfg, monkeypatch):
+    from competition.cli import _funded_teams
+
+    group = cfg.accounts.groups[0]
+    monkeypatch.setenv(f"{group.env_prefix}_KEY_ID", "PK" + "A" * 18)
+    # secret deliberately absent
+    assert _funded_teams(cfg, cfg.teams) == set()
+
+
+def test_per_team_mode_still_reads_the_team_prefix(cfg, monkeypatch):
+    import dataclasses
+
+    from competition.cli import _funded_teams
+    from competition.config import AccountsConfig
+
+    per_team = dataclasses.replace(
+        cfg, accounts=AccountsConfig(mode="per_team", groups=()))
+    team = per_team.teams[0]
+    monkeypatch.setenv(f"{team.env_prefix}_KEY_ID", "PK" + "A" * 18)
+    monkeypatch.setenv(f"{team.env_prefix}_SECRET_KEY", "s" * 40)
+
+    assert _funded_teams(per_team, per_team.teams) == {team.key}

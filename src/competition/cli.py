@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -1065,6 +1066,26 @@ def cmd_backtest(args, cfg: CompetitionConfig) -> int:
     return 0
 
 
+def _funded_teams(cfg: CompetitionConfig, teams: Sequence) -> set[str]:
+    """Which of `teams` can actually trade, given where the keys live.
+
+    In `per_team` mode a team's credentials are its own. In `shared` mode they
+    belong to the account group it sits in, so asking the team directly --
+    which is what this used to do -- reports every team unfunded even when all
+    three accounts are set up correctly.
+    """
+    if not cfg.accounts.is_shared:
+        return {t.key for t in teams if t.has_credentials}
+    wanted = {t.key for t in teams}
+    out: set[str] = set()
+    for group in cfg.accounts.groups:
+        kid = os.environ.get(f"{group.env_prefix}_KEY_ID")
+        sec = os.environ.get(f"{group.env_prefix}_SECRET_KEY")
+        if kid and sec:
+            out |= (set(group.teams) & wanted)
+    return out
+
+
 def cmd_run(args, cfg: CompetitionConfig) -> int:
     rnd = cfg.round(args.round)
     reader = _data_reader(cfg)
@@ -1079,13 +1100,14 @@ def cmd_run(args, cfg: CompetitionConfig) -> int:
     sessions = cal.trading_days(start, end)
 
     teams = _teams_for(cfg, args.team)
-    missing = [t.key for t in teams if not t.has_credentials]
+    funded = _funded_teams(cfg, teams)
+    missing = [t.key for t in teams if t.key not in funded]
     if missing and not args.allow_missing:
         _print(f"ERROR: no Alpaca credentials for: {', '.join(missing)}.")
         _print("Add them to .env, or pass --allow-missing to run only the funded teams,")
         _print("or use `comp backtest` for a no-key dry run.")
         return 1
-    teams = [t for t in teams if t.has_credentials]
+    teams = [t for t in teams if t.key in funded]
     if not teams:
         _print("ERROR: no team has credentials.")
         return 1
