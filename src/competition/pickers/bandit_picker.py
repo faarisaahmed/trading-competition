@@ -49,6 +49,32 @@ FEATURES: dict[str, str] = {
 }
 
 
+def _bar_date(bar) -> Any:
+    """A daily bar's calendar date. `Bar.ts` is the bar's open, always UTC."""
+    ts = getattr(bar, "ts", None)
+    if ts is None:
+        raise AttributeError(
+            f"{type(bar).__name__} has no `ts`; cannot align it by date"
+        )
+    return ts.date() if hasattr(ts, "date") else ts
+
+
+class _WindowCtx:
+    """The slice of `PickerContext` that `raw_features` actually touches.
+
+    Pretraining reuses the live feature code rather than reimplementing it --
+    a second implementation is a second thing to drift.
+    """
+
+    __slots__ = ("_bars",)
+
+    def __init__(self, bars: Sequence[Any]):
+        self._bars = bars
+
+    def bars(self, _symbol: str) -> Sequence[Any]:
+        return self._bars
+
+
 class BanditPicker(Picker):
     DESCRIPTION = (
         "LinUCB contextual bandit over standardised price/volume features, sharing one "
@@ -217,6 +243,105 @@ class BanditPicker(Picker):
                 "bandit_picker: %d rewards applied, %d pulls, mean reward %.4f",
                 len(results), self.pulls, self.total_reward / max(self.pulls, 1),
             )
+
+    # ------------------------------------------------------------------ #
+    # offline pretraining
+    # ------------------------------------------------------------------ #
+
+    def pretrain(
+        self,
+        daily_bars: Mapping[str, Sequence[Any]],
+        *,
+        max_symbols: int = 12,
+        passes: int = 1,
+        horizon: int | None = None,
+        log=None,
+    ) -> dict[str, Any]:
+        """Learn the reward weights offline, by replaying history on-policy.
+
+        This mirrors the live loop exactly rather than fitting the ridge model
+        on every symbol: on each historical date it standardises the pool,
+        picks the top `max_symbols` by UCB, and updates only on *those* --
+        the same bandit feedback it would have received had it been running.
+        Fitting on the whole cross-section would be easier and would converge
+        faster, but it would hand the picker information it could never have
+        gathered itself, which is a different model than the one that then has
+        to keep learning online.
+
+        Returns a summary dict for the CLI to print.
+        """
+        horizon = int(horizon or self.p.reward_horizon_days)
+        logger = log or self.log
+
+        # Index each symbol by date so the pool can be walked in lockstep even
+        # when one name is missing a session.
+        by_date: dict[str, dict[Any, int]] = {}
+        series: dict[str, list[Any]] = {}
+        for sym, bars in daily_bars.items():
+            rows = [b for b in bars if getattr(b, "close", 0) > 0]
+            if len(rows) < self.MIN_HISTORY + horizon + 1:
+                continue
+            series[sym] = rows
+            by_date[sym] = {_bar_date(b): i for i, b in enumerate(rows)}
+        if not series:
+            return {"symbols": 0, "dates": 0, "pulls": 0,
+                    "note": "no symbol had enough daily history"}
+
+        all_dates = sorted({d for idx in by_date.values() for d in idx})
+        usable = all_dates[self.MIN_HISTORY:len(all_dates) - horizon]
+
+        picks = rewards = 0
+        for _pass in range(max(1, int(passes))):
+            for day in usable:
+                table: dict[str, dict[str, float]] = {}
+                fwd: dict[str, float] = {}
+                for sym, idx in by_date.items():
+                    i = idx.get(day)
+                    if i is None or i < self.MIN_HISTORY or i + horizon >= len(series[sym]):
+                        continue
+                    # A fixed tail, not the growing history: every
+                    # feature looks back at most 63 bars, so this is
+                    # identical output for O(1) work per date.
+                    lo = max(0, i + 1 - self.MIN_HISTORY * 2)
+                    window = series[sym][lo : i + 1]
+                    row = self.raw_features(_WindowCtx(window), sym)
+                    if row is None:
+                        continue
+                    here = series[sym][i].close
+                    later = series[sym][i + horizon].close
+                    if here <= 0:
+                        continue
+                    table[sym] = row
+                    fwd[sym] = later / here - 1.0
+                if len(table) < 2:
+                    continue
+
+                vectors = self._standardise(table)
+                ranked = sorted(
+                    vectors.items(), key=lambda kv: self.ucb(kv[1])[0], reverse=True
+                )[:max_symbols]
+                for sym, vec in ranked:
+                    self.update(vec, max(min(fwd[sym], 0.25), -0.25))
+                    rewards += 1
+                picks += 1
+
+        theta = self.theta
+        summary = {
+            "symbols": len(series),
+            "dates": len(usable),
+            "passes": int(passes),
+            "picks_per_date": max_symbols,
+            "pulls": self.pulls,
+            "updates": rewards,
+            "mean_reward": round(self.total_reward / max(self.pulls, 1), 6),
+            "theta": {
+                name: round(float(theta[i]), 5)
+                for i, name in enumerate([*self.p.feature_set, "bias"])
+            },
+        }
+        logger.info("bandit_picker: pretrained on %d symbols over %d dates, "
+                    "%d pulls", summary["symbols"], summary["dates"], self.pulls)
+        return summary
 
     # ------------------------------------------------------------------ #
 

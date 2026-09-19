@@ -10,6 +10,7 @@ Two contracts:
 
 from __future__ import annotations
 
+import json
 import logging
 
 import numpy as np
@@ -307,3 +308,145 @@ def test_bandit_reward_is_clipped(cfg, labelled_pool, labelled_news):
     a.on_fills({s: 10_000.0 for s in result.symbols})     # absurd reward
     assert np.isfinite(a.b).all()
     assert abs(a.b).max() < 100
+
+
+# --------------------------------------------------------------------------- #
+# offline pretraining of the learning picker
+# --------------------------------------------------------------------------- #
+
+
+def _daily_pool(n_symbols=14, sessions=200, seed=7):
+    """Daily bars where momentum genuinely predicts the next few days.
+
+    Each symbol gets its own drift. A picker that learns "high 21-day
+    momentum pays" should therefore end up with a positive weight on it --
+    which is the property worth testing, rather than any particular number.
+    """
+    from datetime import datetime, timedelta
+
+    from competition.types import UTC, Bar
+
+    rng = np.random.default_rng(seed)
+    start = datetime(2025, 1, 2, tzinfo=UTC)
+    out = {}
+    for k in range(n_symbols):
+        sym = f"S{k:02d}"
+        drift = (k - n_symbols / 2) * 0.0009      # spread of persistent trends
+        price, rows = 100.0, []
+        for i in range(sessions):
+            price = max(1.0, price * (1 + drift + rng.normal(0, 0.008)))
+            rows.append(Bar(symbol=sym, ts=start + timedelta(days=i),
+                            open=price * 0.999, high=price * 1.01,
+                            low=price * 0.99, close=price,
+                            volume=1_000_000 + 1000 * i, trade_count=5000,
+                            vwap=price))
+        out[sym] = rows
+    return out
+
+
+def test_pretrain_learns_from_history(cfg):
+    team = cfg.team("q_learner")
+    picker = load_picker(team.picker)(team)
+    assert picker.pulls == 0
+
+    stats = picker.pretrain(_daily_pool(), max_symbols=4)
+
+    assert stats["symbols"] == 14
+    assert stats["dates"] > 50
+    assert stats["pulls"] == stats["dates"] * 4
+    assert picker.pulls == stats["pulls"]
+    # The model must actually have moved off its prior.
+    assert np.abs(picker.b).sum() > 0
+
+
+def test_pretrain_recovers_the_signal_it_was_shown(cfg):
+    """The point of pretraining: arrive already favouring what pays here.
+
+    Asserted on the ranking rather than on any one coefficient. The momentum
+    features are collinear in this pool, so ridge is free to put the weight
+    on the 21- or the 63-day term -- which of them carries it is not the
+    property worth pinning down. Which *names* it prefers is.
+    """
+    from competition.pickers.bandit_picker import _WindowCtx
+
+    team = cfg.team("q_learner")
+    pool = _daily_pool(n_symbols=14, sessions=260)
+    picker = load_picker(team.picker)(team)
+    picker.pretrain(pool, max_symbols=4)
+
+    # Score every name on the final date exactly as `pick` would.
+    table = {sym: picker.raw_features(_WindowCtx(bars), sym)
+             for sym, bars in pool.items()}
+    table = {k: v for k, v in table.items() if v is not None}
+    vectors = picker._standardise(table)
+    ranked = sorted(vectors, key=lambda s: picker.ucb(vectors[s])[1], reverse=True)
+
+    # Symbols are built with drift increasing in their index, so the
+    # best-performing half is the high-numbered half.
+    top_half = {s for s in pool if int(s[1:]) >= len(pool) / 2}
+    chosen = ranked[:4]
+    hits = len(set(chosen) & top_half)
+    assert hits >= 3, f"picked {chosen}; only {hits}/4 from the winning half"
+
+
+def test_pretrain_is_deterministic(cfg):
+    team = cfg.team("q_learner")
+    pool = _daily_pool()
+    a = load_picker(team.picker)(team)
+    b = load_picker(team.picker)(team)
+    a.pretrain(pool, max_symbols=3)
+    b.pretrain(pool, max_symbols=3)
+    assert np.allclose(a.b, b.b) and np.allclose(a.A, b.A)
+
+
+def test_pretrained_model_survives_a_round_trip(cfg):
+    """It has to reach the live run through the ledger intact."""
+    team = cfg.team("q_learner")
+    trained = load_picker(team.picker)(team)
+    trained.pretrain(_daily_pool(), max_symbols=4)
+
+    fresh = load_picker(team.picker)(team)
+    fresh.load_state(json.loads(json.dumps(trained.state_dict())))
+    assert np.allclose(fresh.A, trained.A)
+    assert np.allclose(fresh.b, trained.b)
+    assert np.allclose(fresh.theta, trained.theta)
+
+
+def test_pretraining_then_learning_online_keeps_accumulating(cfg, labelled_pool):
+    """Round 2 must continue from the pretrained model, not restart."""
+    team = cfg.team("q_learner")
+    picker = load_picker(team.picker)(team)
+    picker.pretrain(_daily_pool(), max_symbols=3)
+    before = picker.pulls
+
+    result = picker.pick(ctx_for(labelled_pool, list(labelled_pool), max_symbols=2))
+    picker.on_fills({s: 0.03 for s in result.symbols})
+    assert picker.pulls == before + len(result.symbols)
+
+
+def test_pretrain_ignores_symbols_without_enough_history(cfg):
+    team = cfg.team("q_learner")
+    picker = load_picker(team.picker)(team)
+    pool = _daily_pool(n_symbols=6)
+    pool["TOOSHORT"] = pool["S00"][:20]
+    stats = picker.pretrain(pool, max_symbols=3)
+    assert stats["symbols"] == 6, "a stub series should have been dropped"
+
+
+def test_pretrain_on_an_empty_pool_is_not_an_error(cfg):
+    team = cfg.team("q_learner")
+    picker = load_picker(team.picker)(team)
+    stats = picker.pretrain({}, max_symbols=3)
+    assert stats["pulls"] == 0 and picker.pulls == 0
+    assert "note" in stats
+
+
+def test_pretrain_rejects_bars_it_cannot_date(cfg):
+    """A silent zero result is worse than a loud failure."""
+    from competition.pickers.bandit_picker import _bar_date
+
+    class Undated:
+        close = 1.0
+
+    with pytest.raises(AttributeError, match="ts"):
+        _bar_date(Undated())

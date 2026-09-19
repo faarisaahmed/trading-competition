@@ -611,6 +611,11 @@ def cmd_verify_draft(args, cfg: CompetitionConfig) -> int:
 def cmd_pretrain(args, cfg: CompetitionConfig) -> int:
     """Train the Q-learner offline. Allowed and expected: it is the coding stage."""
     team = cfg.team(args.team_key)
+    if args.only_picker:
+        ledger = Ledger(args.ledger)
+        rc = _pretrain_picker(args, cfg, team, ledger)
+        ledger.close()
+        return rc
     strategy = load_strategy(team.strategy)(team)
     if not hasattr(strategy, "pretrain"):
         _print(f"{team.key} has no pretrain step (only the RL entry does).")
@@ -674,8 +679,101 @@ def cmd_pretrain(args, cfg: CompetitionConfig) -> int:
         _print(f"\nsaved learned state to {args.ledger}")
     else:
         _print("\n--dry-run: nothing saved")
+
+    # ---- the picker ------------------------------------------------------ #
+    # Round 1 has a fixed universe, so the picker is idle until Round 2 -- but
+    # every other team's picker is a deterministic screen that works at full
+    # strength from its first tick. Leaving the only *learning* picker cold
+    # would handicap it for reasons of implementation rather than philosophy.
+    if not args.skip_picker:
+        rc = _pretrain_picker(args, cfg, team, ledger)
+        if rc != 0:
+            ledger.close()
+            return rc
+
     ledger.close()
     return 0
+
+
+def _pretrain_picker(args, cfg: CompetitionConfig, team, ledger) -> int:
+    """Train the team's picker offline, if it has a pretrain step."""
+    picker = load_picker(team.picker)(team)
+    if not hasattr(picker, "pretrain"):
+        return 0
+
+    symbols = [s.strip().upper()
+               for s in (args.picker_symbols or "").split(",") if s.strip()]
+    if not symbols:
+        symbols = _pool_symbols(cfg, args.picker_pool)
+    if not symbols:
+        _print("\nWARNING: no candidate pool for the picker; skipping it.")
+        return 0
+
+    end = _parse_date(args.end) or date.today() - timedelta(days=1)
+    start = end - timedelta(days=args.picker_days)
+    _print("\n-- picker ---------------------------------------------------")
+    _print(f"downloading daily bars for {len(symbols)} symbols, {start} .. {end}")
+
+    if args.source == "alpaca":
+        reader = _data_reader(cfg)
+        if reader is None:
+            _print("ERROR: --source alpaca needs market-data credentials.")
+            return 1
+        bars = reader.bars(
+            symbols, cfg.data.slow_timeframe, limit=2000,
+            start=datetime.combine(start, datetime.min.time(), tzinfo=UTC),
+            end=datetime.combine(end, datetime.max.time(), tzinfo=UTC),
+        )
+    else:
+        from .data.synthetic import generate_daily_history
+
+        # Daily bars directly: generating intraday and collapsing it would
+        # cost a hundred times the work for the same series.
+        bars = generate_daily_history(
+            symbols, end,
+            sessions=max(int(args.picker_days * 5 / 7), 120),
+            seed=args.seed or cfg.fairness.competition_seed,
+            calendar=MarketCalendar(),
+        )
+
+    if args.resume:
+        blob = ledger.load_learned_state(team.key, "picker")
+        if blob:
+            picker.load_state(blob)
+            _print("resumed the saved picker model")
+
+    max_symbols = cfg.round(2).picker.max_symbols
+    stats = picker.pretrain(bars, max_symbols=max_symbols, passes=args.picker_passes)
+    _print(json.dumps(stats, indent=2))
+
+    if args.dry_run:
+        _print("--dry-run: picker not saved")
+        return 0
+    ledger.save_learned_state(team.key, "picker", picker.state_dict(), round_id=0)
+    _print(f"saved picker state to {args.ledger}")
+    return 0
+
+
+def _pool_symbols(cfg: CompetitionConfig, limit: int) -> list[str]:
+    """The most valuable names from the Round 3 pool file, as a training pool.
+
+    A broad cross-section is what the bandit needs: it learns which *feature
+    profile* pays, and that is only visible across many names at once.
+    """
+    path = REPO_ROOT / "data" / "top500.csv"
+    if not path.exists():
+        return []
+    out: list[str] = []
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or line.startswith("rank,"):
+            continue
+        parts = line.split(",")
+        if len(parts) > 1 and parts[1]:
+            out.append(parts[1].strip().upper())
+        if len(out) >= limit:
+            break
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -1859,6 +1957,17 @@ def build_parser() -> argparse.ArgumentParser:
     pt.add_argument("--resume", action="store_true", help="continue from saved state")
     pt.add_argument("--dry-run", action="store_true")
     pt.add_argument("--top", type=int, default=20, help="policy rows to print")
+    pt.add_argument("--only-picker", action="store_true",
+                    help="train only the picker, leaving the strategy untouched")
+    pt.add_argument("--skip-picker", action="store_true",
+                    help="train only the strategy, not its stock picker")
+    pt.add_argument("--picker-symbols", default=None,
+                    help="comma-separated training pool for the picker")
+    pt.add_argument("--picker-pool", type=int, default=150,
+                    help="how many names from the Round 3 pool to train on")
+    pt.add_argument("--picker-days", type=int, default=730,
+                    help="calendar days of daily history for the picker")
+    pt.add_argument("--picker-passes", type=int, default=1)
     pt.set_defaults(func=cmd_pretrain)
 
     bt = sub.add_parser("backtest", help="replay a round offline")
