@@ -1,14 +1,16 @@
 """Run the season as a background service, so nobody has to mind a terminal.
 
-Three weeks of trading is too long to hold a shell open. This installs a macOS
-LaunchAgent that starts the season at login, restarts it if it dies, and keeps
-the machine awake through the session -- with the engine's own checkpointing
-making a restart safe rather than merely survivable.
+Three weeks of trading is too long to hold a shell open. This installs a
+supervised service -- a LaunchAgent on macOS, a systemd user unit on Linux --
+that starts the season, restarts it if it dies, and on a laptop keeps the
+machine awake through the session. The engine checkpoints every tick, which is
+what makes a restart *rejoin* a round rather than restart it.
 
-Deliberately a LaunchAgent (per-user) rather than a LaunchDaemon (system): the
-daemon would run as root, which is a needless privilege for something whose
-only secret is a paper-trading key, and it would run outside the user session
-where `caffeinate` cannot hold the display awake.
+Both are per-user rather than system-wide. Root is a needless privilege for
+something whose only secret is a paper-trading key.
+
+On macOS the process is wrapped in `caffeinate` because a desktop sleeps; on a
+Linux server there is nothing to keep awake, so it is not.
 """
 
 from __future__ import annotations
@@ -21,8 +23,14 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+#: Which supervisor this platform uses.
+PLATFORM = "launchd" if sys.platform == "darwin" else "systemd"
+
 #: Reverse-DNS label, the macOS convention. Also the plist's filename.
 LABEL = "com.trading-competition.season"
+
+#: systemd prefers a plain name.
+UNIT_NAME = "trading-competition"
 
 
 class ServiceError(RuntimeError):
@@ -42,8 +50,13 @@ class ServicePaths:
 
 def paths(repo: Path) -> ServicePaths:
     logs = repo / "runs" / "logs"
+    if PLATFORM == "launchd":
+        unit = Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
+    else:
+        unit = (Path.home() / ".config" / "systemd" / "user"
+                / f"{UNIT_NAME}.service")
     return ServicePaths(
-        plist=Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist",
+        plist=unit,
         stdout=logs / "season.out.log",
         stderr=logs / "season.err.log",
     )
@@ -109,6 +122,44 @@ def build_plist(repo: Path, *, extra_args: list[str] | None = None) -> dict:
     }
 
 
+def build_unit(repo: Path, *, extra_args: list[str] | None = None) -> str:
+    """The systemd user unit. No `caffeinate`: a server does not sleep."""
+    comp = _comp_executable()
+    args = " ".join(["season", *(extra_args or [])])
+    return f"""[Unit]
+Description=2026 Model Trading Competition -- season runner
+Documentation=https://github.com/faarisaahmed/trading-competition
+# Alpaca and GitHub are both unreachable before the network is up, and the
+# first thing the season does on a restart is read the accounts.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={repo}
+ExecStart={comp} {args}
+# The engine checkpoints every tick, so a restart rejoins the round.
+Restart=always
+RestartSec=60
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH={Path(comp).parent}:/usr/local/bin:/usr/bin:/bin
+StandardOutput=append:{paths(repo).stdout}
+StandardError=append:{paths(repo).stderr}
+
+[Install]
+WantedBy=default.target
+"""
+
+
+def _systemctl(*args: str, check: bool = True) -> subprocess.CompletedProcess:
+    proc = subprocess.run(["systemctl", "--user", *args],
+                          capture_output=True, text=True)
+    if check and proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout).strip()
+        raise ServiceError(f"systemctl {args[0]} failed: {detail[:200]}")
+    return proc
+
+
 def _launchctl(*args: str, check: bool = True) -> subprocess.CompletedProcess:
     proc = subprocess.run(["launchctl", *args], capture_output=True, text=True)
     if check and proc.returncode != 0:
@@ -118,37 +169,67 @@ def _launchctl(*args: str, check: bool = True) -> subprocess.CompletedProcess:
 
 
 def install(repo: Path, *, extra_args: list[str] | None = None) -> ServicePaths:
-    """Write the plist and start the agent. Safe to re-run."""
+    """Write the unit and start the service. Safe to re-run."""
     p = paths(repo)
     p.plist.parent.mkdir(parents=True, exist_ok=True)
     p.stdout.parent.mkdir(parents=True, exist_ok=True)
 
-    data = build_plist(repo, extra_args=extra_args)
-    p.plist.write_bytes(plistlib.dumps(data))
+    if PLATFORM == "launchd":
+        p.plist.write_bytes(plistlib.dumps(build_plist(repo, extra_args=extra_args)))
+        # Replace any previous incarnation rather than erroring on a duplicate.
+        _launchctl("bootout", p.target, check=False)
+        _launchctl("bootstrap", f"gui/{os.getuid()}", str(p.plist))
+        _launchctl("enable", p.target, check=False)
+        return p
 
-    # Replace any previous incarnation rather than erroring on a duplicate.
-    _launchctl("bootout", p.target, check=False)
-    _launchctl("bootstrap", f"gui/{os.getuid()}", str(p.plist))
-    _launchctl("enable", p.target, check=False)
+    p.plist.write_text(build_unit(repo, extra_args=extra_args))
+    _systemctl("daemon-reload")
+    _systemctl("enable", "--now", f"{UNIT_NAME}.service")
+    # Without lingering, a user service stops the moment you log out -- which
+    # on a VPS is the moment you close the SSH session.
+    subprocess.run(["loginctl", "enable-linger", os.environ.get("USER", "")],
+                   capture_output=True, text=True)
     return p
 
 
 def uninstall(repo: Path) -> bool:
-    """Stop and remove the agent. True if there was one."""
+    """Stop and remove the service. True if there was one."""
     p = paths(repo)
     existed = p.plist.exists()
-    _launchctl("bootout", p.target, check=False)
+    if PLATFORM == "launchd":
+        _launchctl("bootout", p.target, check=False)
+    else:
+        _systemctl("disable", "--now", f"{UNIT_NAME}.service", check=False)
     if existed:
         p.plist.unlink()
+        if PLATFORM == "systemd":
+            _systemctl("daemon-reload", check=False)
     return existed
 
 
 def status(repo: Path) -> dict:
-    """What launchd currently thinks of the agent."""
+    """What the supervisor currently thinks of the service."""
     p = paths(repo)
-    out = {"installed": p.plist.exists(), "label": LABEL,
+    out = {"installed": p.plist.exists(),
+           "label": LABEL if PLATFORM == "launchd" else UNIT_NAME,
+           "platform": PLATFORM,
            "plist": str(p.plist), "running": False, "pid": None,
            "last_exit": None}
+    if PLATFORM == "systemd":
+        proc = _systemctl("show", f"{UNIT_NAME}.service",
+                          "--property=MainPID,ActiveState,ExecMainStatus",
+                          check=False)
+        if proc.returncode != 0:
+            return out
+        fields = dict(
+            line.split("=", 1) for line in proc.stdout.splitlines() if "=" in line
+        )
+        pid = int(fields.get("MainPID", "0") or 0)
+        out["running"] = fields.get("ActiveState") == "active" and pid > 0
+        out["pid"] = pid or None
+        out["last_exit"] = fields.get("ExecMainStatus")
+        return out
+
     proc = _launchctl("print", p.target, check=False)
     if proc.returncode != 0:
         return out

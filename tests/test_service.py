@@ -192,3 +192,97 @@ def test_launchctl_failure_is_reported(monkeypatch):
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: P())
     with pytest.raises(ServiceError, match="Load failed"):
         service._launchctl("bootstrap", "gui/501", "/x.plist")
+
+
+# --------------------------------------------------------------------------- #
+# the Linux path
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def linux(monkeypatch):
+    monkeypatch.setattr(service, "PLATFORM", "systemd")
+
+
+def test_the_unit_runs_the_season(tmp_path, linux):
+    unit = service.build_unit(tmp_path)
+    assert "ExecStart=" in unit and unit.rstrip().endswith("WantedBy=default.target")
+    assert " season" in unit
+    assert f"WorkingDirectory={tmp_path}" in unit
+
+
+def test_the_unit_does_not_wrap_caffeinate(tmp_path, linux):
+    """A server does not sleep; caffeinate does not exist there anyway."""
+    assert "caffeinate" not in service.build_unit(tmp_path)
+
+
+def test_the_unit_restarts_and_waits_for_the_network(tmp_path, linux):
+    unit = service.build_unit(tmp_path)
+    assert "Restart=always" in unit
+    assert "RestartSec=60" in unit
+    assert "network-online.target" in unit, (
+        "Alpaca is unreachable before the network is up")
+
+
+def test_the_unit_sets_an_explicit_path(tmp_path, linux):
+    """systemd gives a service almost no environment."""
+    assert "Environment=PATH=" in service.build_unit(tmp_path)
+
+
+def test_linux_uses_a_systemd_unit_path(tmp_path, linux, monkeypatch):
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    p = service.paths(tmp_path)
+    assert p.plist.suffix == ".service"
+    assert ".config/systemd/user" in str(p.plist)
+
+
+def test_linux_install_enables_and_lingers(tmp_path, linux, monkeypatch):
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path / "home"))
+    calls = []
+    monkeypatch.setattr(service, "_systemctl",
+                        lambda *a, **k: calls.append(a) or _ok())
+    ran = []
+    monkeypatch.setattr(service.subprocess, "run",
+                        lambda cmd, **k: ran.append(cmd) or _ok())
+
+    p = service.install(tmp_path)
+    assert p.plist.exists()
+    verbs = [c[0] for c in calls]
+    assert "daemon-reload" in verbs and "enable" in verbs
+    assert any("enable-linger" in " ".join(c) for c in ran), (
+        "without lingering the service dies when the SSH session closes")
+
+
+def test_linux_status_parses_systemctl(tmp_path, linux, monkeypatch):
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path / "home"))
+
+    class P:
+        returncode = 0
+        stdout = "MainPID=8123\nActiveState=active\nExecMainStatus=0\n"
+        stderr = ""
+
+    monkeypatch.setattr(service, "_systemctl", lambda *a, **k: P())
+    st = service.status(tmp_path)
+    assert st["running"] is True and st["pid"] == 8123
+    assert st["platform"] == "systemd"
+
+
+def test_linux_status_knows_when_it_is_stopped(tmp_path, linux, monkeypatch):
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path / "home"))
+
+    class P:
+        returncode = 0
+        stdout = "MainPID=0\nActiveState=inactive\nExecMainStatus=1\n"
+        stderr = ""
+
+    monkeypatch.setattr(service, "_systemctl", lambda *a, **k: P())
+    st = service.status(tmp_path)
+    assert st["running"] is False and st["pid"] is None
+
+
+def _ok():
+    class P:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+    return P()

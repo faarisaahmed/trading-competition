@@ -56,8 +56,10 @@ comp service uninstall   # stop and remove it
 **The one thing this cannot survive** is a closed lid. macOS sleeps a laptop
 on lid-close regardless of `caffeinate`, unless it is on mains power with an
 external display attached. If the machine is a laptop that travels, put the
-season on an always-on box instead -- any small Linux host will do, since
-nothing here is macOS-specific except this service file.
+season on an always-on box instead: `comp service install` writes a systemd
+user unit on Linux and nothing else in the project is macOS-specific. See
+[docs/hosting.md](hosting.md), which also covers moving a season that has
+already started.
 
 ### Equalising the accounts
 

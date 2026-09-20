@@ -187,7 +187,8 @@ account or the run stops.
 Prefer broker-enforced isolation? Three logins × three $5,000 accounts and
 `accounts.mode: per_team` in the rulebook gives every team its own real
 account; nothing else changes. Full walkthrough either way:
-[docs/accounts.md](docs/accounts.md).
+[docs/accounts.md](docs/accounts.md). To leave the season running unattended for three weeks, on this machine or a server:
+[docs/hosting.md](docs/hosting.md).
 
 4. Pre-train the RL entry once, before Round 1 (this is the coding stage, so it
    is allowed — and it is what makes an RL entry viable over three weeks):
