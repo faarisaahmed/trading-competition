@@ -16,22 +16,61 @@ import pytest
 from competition import service
 from competition.service import LABEL, ServiceError, build_plist, paths
 
+#: The real helpers, grabbed at import time. The autouse fixture below swaps
+#: the module attributes out, so a test that wants to exercise the helper
+#: itself has to hold its own reference.
+_REAL_LAUNCHCTL = service._launchctl
+_REAL_SYSTEMCTL = service._systemctl
+
+
+def _ok():
+    """A successful subprocess result."""
+    class P:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+    return P()
+
+
+@pytest.fixture(autouse=True)
+def never_touch_the_supervisor(monkeypatch):
+    """No test may invoke a real `launchctl` or `systemctl`.
+
+    Not merely for isolation: without this, running the suite on Linux
+    genuinely attempted to install a systemd unit on the machine under test,
+    because only the macOS helper was being mocked. Both are blocked by
+    default and individual tests opt in to a recorder.
+    """
+    def refuse(name):
+        def boom(*args, **kwargs):
+            raise AssertionError(
+                f"a test tried to run real {name} {args!r}. Mock it."
+            )
+        return boom
+
+    monkeypatch.setattr(service, "_launchctl", refuse("launchctl"))
+    monkeypatch.setattr(service, "_systemctl", refuse("systemctl"))
+    monkeypatch.setattr(service.subprocess, "run", refuse("subprocess.run"))
+
 
 @pytest.fixture
-def no_launchctl(monkeypatch):
-    """Record launchctl calls instead of making them."""
+def macos(monkeypatch):
+    """Force the launchd path, whatever platform the suite runs on."""
+    monkeypatch.setattr(service, "PLATFORM", "launchd")
+
+
+@pytest.fixture
+def no_launchctl(monkeypatch, macos):
+    """Record supervisor calls instead of making them."""
     calls = []
 
     def fake(*args, check=True):
         calls.append(args)
-
-        class P:
-            returncode = 0
-            stdout = ""
-            stderr = ""
-        return P()
+        return _ok()
 
     monkeypatch.setattr(service, "_launchctl", fake)
+    monkeypatch.setattr(service, "_systemctl", fake)
+    monkeypatch.setattr(service.subprocess, "run", lambda *a, **k: _ok())
     return calls
 
 
@@ -153,7 +192,7 @@ def test_uninstall_when_nothing_is_installed(tmp_path, monkeypatch, no_launchctl
     assert service.uninstall(tmp_path) is False
 
 
-def test_status_reports_not_installed(tmp_path, monkeypatch):
+def test_status_reports_not_installed(tmp_path, monkeypatch, macos):
     home = tmp_path / "home"
     monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
 
@@ -167,7 +206,7 @@ def test_status_reports_not_installed(tmp_path, monkeypatch):
     assert st["installed"] is False and st["running"] is False
 
 
-def test_status_parses_a_running_agent(tmp_path, monkeypatch):
+def test_status_parses_a_running_agent(tmp_path, monkeypatch, macos):
     home = tmp_path / "home"
     monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
 
@@ -182,16 +221,39 @@ def test_status_parses_a_running_agent(tmp_path, monkeypatch):
 
 
 def test_launchctl_failure_is_reported(monkeypatch):
-    import subprocess
-
+    """The helper must surface launchctl's own complaint, not swallow it."""
     class P:
         returncode = 1
         stdout = ""
         stderr = "Load failed: 5: Input/output error"
 
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: P())
+    monkeypatch.setattr(service.subprocess, "run", lambda *a, **k: P())
     with pytest.raises(ServiceError, match="Load failed"):
-        service._launchctl("bootstrap", "gui/501", "/x.plist")
+        _REAL_LAUNCHCTL("bootstrap", "gui/501", "/x.plist")
+
+
+def test_systemctl_failure_is_reported(monkeypatch):
+    class P:
+        returncode = 1
+        stdout = ""
+        stderr = "Failed to enable unit: No such file or directory"
+
+    monkeypatch.setattr(service.subprocess, "run", lambda *a, **k: P())
+    with pytest.raises(ServiceError, match="Failed to enable"):
+        _REAL_SYSTEMCTL("enable", "x.service")
+
+
+def test_the_suite_cannot_install_a_real_service():
+    """A guard on the guard.
+
+    Running the tests on Linux once genuinely tried to `systemctl enable` a
+    unit on the machine, because only the macOS helper was mocked. If the
+    autouse fixture ever stops covering both, this fails loudly.
+    """
+    with pytest.raises(AssertionError, match="Mock it"):
+        service._systemctl("enable", "anything")
+    with pytest.raises(AssertionError, match="Mock it"):
+        service._launchctl("bootstrap", "anything")
 
 
 # --------------------------------------------------------------------------- #
@@ -204,15 +266,30 @@ def linux(monkeypatch):
     monkeypatch.setattr(service, "PLATFORM", "systemd")
 
 
+@pytest.fixture
+def no_systemctl(monkeypatch, linux):
+    calls = []
+
+    def fake(*args, check=True):
+        calls.append(args)
+        return _ok()
+
+    monkeypatch.setattr(service, "_systemctl", fake)
+    monkeypatch.setattr(service, "_launchctl", fake)
+    monkeypatch.setattr(service.subprocess, "run", lambda *a, **k: _ok())
+    return calls
+
+
 def test_the_unit_runs_the_season(tmp_path, linux):
     unit = service.build_unit(tmp_path)
-    assert "ExecStart=" in unit and unit.rstrip().endswith("WantedBy=default.target")
+    assert "ExecStart=" in unit
+    assert unit.rstrip().endswith("WantedBy=default.target")
     assert " season" in unit
     assert f"WorkingDirectory={tmp_path}" in unit
 
 
 def test_the_unit_does_not_wrap_caffeinate(tmp_path, linux):
-    """A server does not sleep; caffeinate does not exist there anyway."""
+    """A server does not sleep, and the binary is not there anyway."""
     assert "caffeinate" not in service.build_unit(tmp_path)
 
 
@@ -236,24 +313,28 @@ def test_linux_uses_a_systemd_unit_path(tmp_path, linux, monkeypatch):
     assert ".config/systemd/user" in str(p.plist)
 
 
-def test_linux_install_enables_and_lingers(tmp_path, linux, monkeypatch):
+def test_linux_install_enables_and_lingers(tmp_path, monkeypatch, no_systemctl):
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path / "home"))
-    calls = []
-    monkeypatch.setattr(service, "_systemctl",
-                        lambda *a, **k: calls.append(a) or _ok())
     ran = []
     monkeypatch.setattr(service.subprocess, "run",
                         lambda cmd, **k: ran.append(cmd) or _ok())
 
     p = service.install(tmp_path)
     assert p.plist.exists()
-    verbs = [c[0] for c in calls]
+    verbs = [c[0] for c in no_systemctl]
     assert "daemon-reload" in verbs and "enable" in verbs
     assert any("enable-linger" in " ".join(c) for c in ran), (
         "without lingering the service dies when the SSH session closes")
 
 
-def test_linux_status_parses_systemctl(tmp_path, linux, monkeypatch):
+def test_linux_uninstall_removes_the_unit(tmp_path, monkeypatch, no_systemctl):
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path / "home"))
+    service.install(tmp_path)
+    assert service.uninstall(tmp_path) is True
+    assert not service.paths(tmp_path).plist.exists()
+
+
+def test_linux_status_parses_systemctl(tmp_path, monkeypatch, linux):
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path / "home"))
 
     class P:
@@ -267,7 +348,7 @@ def test_linux_status_parses_systemctl(tmp_path, linux, monkeypatch):
     assert st["platform"] == "systemd"
 
 
-def test_linux_status_knows_when_it_is_stopped(tmp_path, linux, monkeypatch):
+def test_linux_status_knows_when_it_is_stopped(tmp_path, monkeypatch, linux):
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path / "home"))
 
     class P:
@@ -278,11 +359,3 @@ def test_linux_status_knows_when_it_is_stopped(tmp_path, linux, monkeypatch):
     monkeypatch.setattr(service, "_systemctl", lambda *a, **k: P())
     st = service.status(tmp_path)
     assert st["running"] is False and st["pid"] is None
-
-
-def _ok():
-    class P:
-        returncode = 0
-        stdout = ""
-        stderr = ""
-    return P()
