@@ -198,3 +198,55 @@ def test_no_scratch_branches_accumulate(repo):
     branches = subprocess.run(["git", "branch", "--list"], cwd=repo.work,
                               capture_output=True, text=True).stdout
     assert "pages-build-" not in branches, branches
+
+
+# --------------------------------------------------------------------------- #
+# carrying the ledger between runs
+# --------------------------------------------------------------------------- #
+
+
+def test_state_round_trips_binary_exactly(repo, tmp_path):
+    """A SQLite file that changes by one byte is a corrupt ledger."""
+    from competition.reporting.publish import pull_state, push_state
+
+    blob = bytes(range(256)) * 400          # every byte value, incl. NUL
+    push_state({"competition.sqlite": blob}, repo=repo.work, branch="season-state")
+
+    dest = tmp_path / "restored"
+    names = pull_state(repo=repo.work, branch="season-state", dest=dest)
+    assert names == ["competition.sqlite"]
+    assert (dest / "competition.sqlite").read_bytes() == blob
+
+
+def test_state_pull_on_a_fresh_repo_is_empty_not_an_error(repo, tmp_path):
+    from competition.reporting.publish import pull_state
+
+    assert pull_state(repo=repo.work, branch="never-pushed",
+                      dest=tmp_path) == []
+
+
+def test_state_keeps_only_the_latest(repo, tmp_path):
+    from competition.reporting.publish import pull_state, push_state
+
+    push_state({"competition.sqlite": b"old"}, repo=repo.work, branch="season-state")
+    push_state({"competition.sqlite": b"new"}, repo=repo.work, branch="season-state")
+    pull_state(repo=repo.work, branch="season-state", dest=tmp_path)
+    assert (tmp_path / "competition.sqlite").read_bytes() == b"new"
+    count = subprocess.run(["git", "rev-list", "--count", "season-state"],
+                           cwd=repo.bare, capture_output=True,
+                           text=True).stdout.strip()
+    assert count == "1", "state is not history; it must not accumulate commits"
+
+
+def test_state_pushes_files_git_would_otherwise_ignore(repo, tmp_path):
+    """`runs/` is gitignored -- the push must force-add anyway."""
+    from competition.reporting.publish import pull_state, push_state
+
+    (repo.work / ".gitignore").write_text("runs/\n*.sqlite\n")
+    subprocess.run(["git", "add", "-A"], cwd=repo.work, check=True,
+                   capture_output=True)
+    subprocess.run(["git", "commit", "-qm", "ignore"], cwd=repo.work, check=True,
+                   capture_output=True)
+
+    push_state({"competition.sqlite": b"data"}, repo=repo.work, branch="season-state")
+    assert pull_state(repo=repo.work, branch="season-state", dest=tmp_path)

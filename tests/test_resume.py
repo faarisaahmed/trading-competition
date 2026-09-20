@@ -375,3 +375,38 @@ def test_no_checkpoint_means_no_resume(cfg, tmp_path):
     assert ledger.resumable_round(1) is None
     assert load_round_checkpoint(None) is None
     ledger.close()
+
+
+# --------------------------------------------------------------------------- #
+# suspending a round that runs out of wall-clock time
+# --------------------------------------------------------------------------- #
+
+
+def test_suspend_is_not_the_same_as_stop(cfg):
+    """The distinction the whole split-job scheme rests on.
+
+    `stop` ends a round: flatten, score, record. `suspend` means only that
+    this process is out of time -- the round is unfinished and must be handed
+    on intact. Confusing them would liquidate every team at lunchtime and
+    score a half-round.
+    """
+    import inspect
+
+    from competition.engine.runner import CompetitionEngine, RoundSuspended
+
+    sig = inspect.signature(CompetitionEngine.run_live)
+    assert "suspend" in sig.parameters and "stop" in sig.parameters
+
+    src = inspect.getsource(CompetitionEngine.run_live)
+    stop_at = src.index("stop is not None and stop()")
+    suspend_at = src.index("suspend is not None and suspend()")
+    # The stop branch breaks out into finish_round; the suspend branch must
+    # raise instead, so it can never reach scoring.
+    suspend_block = src[suspend_at:suspend_at + 500]
+    assert "RoundSuspended" in suspend_block
+    assert "checkpoint" in suspend_block
+    assert "finish_round" not in suspend_block
+    assert stop_at != suspend_at
+
+    e = RoundSuspended(2, 41)
+    assert e.round_id == 2 and e.ticks == 41

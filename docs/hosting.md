@@ -1,4 +1,4 @@
-# Running the season on a server
+# Running the season without minding a terminal
 
 The season has to be running for three weeks. A laptop can do it, but macOS
 sleeps a laptop on lid-close whatever `caffeinate` says, so if the machine
@@ -9,6 +9,40 @@ internet traffic *to* a server you are already running, which does not remove
 the need for that server. This project also never accepts an inbound
 connection: it makes outbound calls to Alpaca and pushes the dashboard to
 GitHub. There is nothing for a tunnel to do.
+
+## The easiest option: GitHub Actions
+
+No server, no account, no card, nothing running on your own machine. This repo
+is public, which means unlimited free Actions minutes. Your laptop can be shut
+in a bag on another continent.
+
+```bash
+./scripts/push_secrets.sh          # copies the keys from .env into the repo
+gh workflow run Season             # or just wait for the next schedule
+```
+
+`push_secrets.sh` reads `.env`, never prints a value, and sets the eight
+secrets the workflow needs.
+
+**How it works.** A session runs 13:30-20:00 UTC, which is longer than the six
+hours a single Actions job may run, so the day is split in two and the baton
+is passed on disk. The engine checkpoints every tick; `comp state pull/push`
+parks the ledger on a branch between jobs. The afternoon job resumes the round
+exactly where the morning job left it.
+
+That distinction matters more than it looks: a round that merely runs out of
+wall-clock time is **suspended**, not stopped. Stopping flattens every
+position and scores the round. If the handover used the stop path, every team
+would be liquidated at lunchtime and a half-round scored. They are separate
+code paths, and a test asserts they stay separate.
+
+**What it gives up.** Actions cron is best-effort -- GitHub may delay a
+scheduled run by 10-15 minutes under load. The morning job is therefore
+scheduled 25 minutes before the bell, so an average delay still catches the
+open. A severe delay would cost the first few minutes of a session, equally,
+for every team. If that is unacceptable, use a server instead.
+
+Watch it at `https://github.com/faarisaahmed/trading-competition/actions`.
 
 ## What it needs
 

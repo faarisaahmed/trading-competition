@@ -213,6 +213,20 @@ class StrategyTimeout(RuntimeError):
     pass
 
 
+class RoundSuspended(Exception):
+    """Raised when a round is paused mid-flight rather than finished.
+
+    A round that is merely out of wall-clock time must not be liquidated or
+    scored -- it has to be picked up where it left off, which is what the
+    per-tick checkpoint exists for.
+    """
+
+    def __init__(self, round_id: int, ticks: int):
+        super().__init__(f"round {round_id} suspended after {ticks} ticks")
+        self.round_id = round_id
+        self.ticks = ticks
+
+
 class CompetitionEngine:
     """Runs one round for all teams against a feed and a broker per team."""
 
@@ -982,6 +996,7 @@ class CompetitionEngine:
         max_ticks: int | None = None,
         sleep: Callable[[float], None] = time.sleep,
         stop: Callable[[], bool] | None = None,
+        suspend: Callable[[], bool] | None = None,
         resume: RoundCheckpoint | None = None,
     ) -> RoundResult:
         """Run against live Alpaca paper accounts until the window closes."""
@@ -1010,6 +1025,13 @@ class CompetitionEngine:
             if stop is not None and stop():
                 log.info("round %d: stop requested", rnd.id)
                 break
+            if suspend is not None and suspend():
+                # Not the same as stopping. The round is unfinished: hand it
+                # to the next process rather than flattening and scoring it.
+                self.checkpoint(rnd, ticks=ticks)
+                log.info("round %d: suspended after %d ticks; positions and "
+                         "learned state are checkpointed", rnd.id, ticks)
+                raise RoundSuspended(rnd.id, ticks)
             if max_ticks is not None and ticks >= max_ticks:
                 break
             now = self.clock()

@@ -21,6 +21,7 @@ import re
 import subprocess
 import tempfile
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -130,6 +131,85 @@ def publish(
         pushed_at=stamp,
         bytes_written=len(html.encode("utf-8")),
     )
+
+
+def push_state(
+    files: Mapping[str, bytes],
+    *,
+    repo: Path,
+    branch: str,
+    message: str | None = None,
+    remote: str = "origin",
+) -> str:
+    """Force `branch` to a single commit holding `files` (path -> bytes).
+
+    Used to carry the ledger between runs on a host with no persistent disk.
+    Single-commit for the same reason the dashboard is: this is state, not
+    history, and a commit per session would be thousands of them.
+    """
+    repo = Path(repo).resolve()
+    scratch = f"state-build-{uuid.uuid4().hex[:12]}"
+    stamp = datetime.now().astimezone()
+    message = message or f"state {stamp:%Y-%m-%d %H:%M:%S %Z}"
+
+    with tempfile.TemporaryDirectory(prefix="comp-state-") as tmp:
+        tree = Path(tmp) / "state"
+        _git("worktree", "add", "--detach", "--no-checkout", str(tree), cwd=repo)
+        try:
+            _git("checkout", "--orphan", scratch, cwd=tree)
+            _git("reset", "--hard", cwd=tree)
+            for name, body in files.items():
+                dest = tree / name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(body)
+            _git("add", "-A", "-f", cwd=tree)      # -f: state is gitignored
+            _git("-c", "user.name=competition-bot",
+                 "-c", "user.email=bot@localhost",
+                 "commit", "-q", "-m", message, cwd=tree)
+            commit = _git("rev-parse", "HEAD", cwd=tree)
+            _git("push", "--force", remote, f"HEAD:refs/heads/{branch}", cwd=tree)
+        finally:
+            _git("worktree", "remove", "--force", str(tree), cwd=repo, check=False)
+            _git("branch", "-D", scratch, cwd=repo, check=False)
+    return commit[:12]
+
+
+def pull_state(
+    *,
+    repo: Path,
+    branch: str,
+    dest: Path,
+    remote: str = "origin",
+) -> list[str]:
+    """Restore whatever `push_state` last wrote. [] if the branch is absent."""
+    repo = Path(repo).resolve()
+    probe = subprocess.run(
+        ["git", "ls-remote", "--heads", remote, branch],
+        cwd=repo, capture_output=True, text=True,
+    )
+    if probe.returncode != 0 or not probe.stdout.strip():
+        return []                                  # first ever run
+
+    _git("fetch", "--depth", "1", remote, f"{branch}:refs/remotes/{remote}/{branch}",
+         cwd=repo, check=False)
+    listing = _git("ls-tree", "-r", "--name-only", f"{remote}/{branch}", cwd=repo)
+    restored = []
+    dest = Path(dest)
+    for name in listing.splitlines():
+        name = name.strip()
+        if not name:
+            continue
+        blob = subprocess.run(
+            ["git", "show", f"{remote}/{branch}:{name}"],
+            cwd=repo, capture_output=True,
+        )
+        if blob.returncode != 0:
+            continue
+        out = dest / name
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(blob.stdout)
+        restored.append(name)
+    return restored
 
 
 def pages_url(repo: Path, branch: str = "gh-pages") -> str | None:

@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
 import os
@@ -40,6 +41,7 @@ from .draft import DraftError
 from .draft import verify as verify_draft
 from .engine import CompetitionEngine, Ledger, UniverseResolver
 from .engine.checkpoint import load_round_checkpoint
+from .engine.runner import RoundSuspended
 from .pickers import load_picker
 from .scoring import build_leaderboard, score_round
 from .setup import (
@@ -62,6 +64,10 @@ from .strategies import load_strategy
 from .types import UTC, Bar, utcnow
 
 log = logging.getLogger("competition.cli")
+
+#: `comp run` exited because it ran out of wall-clock time, with the
+#: round still in progress. Distinct from success and from failure.
+EXIT_SUSPENDED = 75
 
 DEFAULT_LEDGER = REPO_ROOT / "runs" / "competition.sqlite"
 DEFAULT_DASHBOARD = REPO_ROOT / "runs" / "dashboard.html"
@@ -1330,11 +1336,24 @@ def cmd_run(args, cfg: CompetitionConfig) -> int:
     engine.load_learned_state()
     _attach_dashboard(engine, cfg, args)
 
+    deadline = getattr(args, "_deadline", None)
+    suspend = None
+    if deadline is not None:
+        def suspend() -> bool:            # noqa: E731 -- a named closure reads better
+            return time.monotonic() >= deadline
+
     try:
         result = engine.run_live(
             rnd, start=start, end=end, poll_seconds=args.poll,
-            max_ticks=args.max_ticks, resume=resume,
+            max_ticks=args.max_ticks, resume=resume, suspend=suspend,
         )
+    except RoundSuspended as e:
+        # Out of wall-clock time, not out of round. Everything needed to
+        # resume is on disk; the next process picks it up.
+        _print(f"\nsuspended round {e.round_id} after {e.ticks} ticks "
+               f"-- checkpointed, not scored.")
+        ledger.close()
+        return EXIT_SUSPENDED
     except KeyboardInterrupt:
         _print("\ninterrupted -- flattening and scoring what we have.")
         result = engine.finish_round(rnd, started_at=utcnow(), ticks=0)
@@ -1414,6 +1433,12 @@ def _publish_now(cfg, args, html: str | None) -> None:
         log.warning("could not publish: %s", e)
 
 
+def humanise_secs(secs: float) -> str:
+    from .schedule import humanise
+
+    return humanise(secs)
+
+
 def cmd_season(args, cfg: CompetitionConfig) -> int:
     """Run the whole season start to finish with no human in the loop.
 
@@ -1461,6 +1486,27 @@ def cmd_season(args, cfg: CompetitionConfig) -> int:
     # The dashboard hook needs the schedule to render the countdown.
     args._schedule = schedule
     done: set[int] = set()
+    # A wall-clock budget, for hosts that cap how long a process may run
+    # (a CI job, say). Reaching it suspends the round rather than ending it.
+    deadline = None
+    if getattr(args, "until", None):
+        # An ABSOLUTE wall-clock stop, not a relative budget. A job that
+        # starts late must still finish on time, or it overlaps the next one
+        # and two processes trade the same accounts.
+        try:
+            hh, mm = (int(x) for x in args.until.split(":"))
+            target = utcnow().replace(hour=hh, minute=mm, second=0, microsecond=0)
+        except ValueError:
+            _print(f"ERROR: --until wants UTC HH:MM, got {args.until!r}")
+            return 2
+        secs = (target - utcnow()).total_seconds()
+        if secs <= 0:
+            _print(f"--until {args.until} UTC has already passed; nothing to do.")
+            return 0
+        deadline = time.monotonic() + secs
+        _print(f"  stopping : {args.until} UTC ({humanise_secs(secs)} from now)")
+    elif getattr(args, "max_runtime", 0):
+        deadline = time.monotonic() + args.max_runtime
 
     while True:
         now = utcnow()
@@ -1485,6 +1531,9 @@ def cmd_season(args, cfg: CompetitionConfig) -> int:
             _print(f"waiting for round {nxt.round_id} ({nxt.name}): "
                    f"{humanise(wait)} -- opens {nxt.opens_at:%a %d %b %H:%M} UTC")
             _publish_now(cfg, args, _idle_dashboard(cfg, args, schedule))
+            if deadline is not None and time.monotonic() >= deadline:
+                _print("out of time for this run; nothing is in progress.")
+                return 0
             # Wake up often enough to keep the published clock fresh, and to
             # notice a machine that slept through the open.
             time.sleep(min(wait + 1, max(pub.every_seconds, 60)))
@@ -1501,11 +1550,16 @@ def cmd_season(args, cfg: CompetitionConfig) -> int:
 
         round_args = _RoundArgs(args, round_id=window.round_id,
                                 start=window.start_date, end=window.end_date)
+        round_args._deadline = deadline
         try:
             rc = cmd_run(round_args, cfg)
         except KeyboardInterrupt:
             _print("\nseason interrupted.")
             return 130
+        if rc == EXIT_SUSPENDED:
+            _print("out of time for this run; the round is checkpointed and "
+                   "will continue when the season next starts.")
+            return 0
         if rc != 0:
             _print(f"\nERROR: round {window.round_id} exited with code {rc}; "
                    f"stopping the season. Fix the problem and re-run "
@@ -1538,6 +1592,96 @@ class _RoundArgs:
 
     def __getattr__(self, name):
         return getattr(self._base, name)
+
+
+# --------------------------------------------------------------------------- #
+# publish the dashboard on demand
+# --------------------------------------------------------------------------- #
+
+
+def cmd_publish(args, cfg: CompetitionConfig) -> int:
+    """Render the dashboard and push it to GitHub Pages, once."""
+    from .reporting.dashboard import build_dashboard_data, render_dashboard
+    from .reporting.publish import PublishError, publish
+
+    ledger = Ledger(args.ledger)
+    runs = ledger.runs()
+    if runs:
+        ledger.run_id = runs[-1]["run_id"]
+    round_id = None
+    pending = ledger.in_progress_rounds()
+    if pending:
+        round_id = int(pending[0]["round_id"])
+    else:
+        scored = [r.id for r in cfg.rounds if ledger.results_for_round(r.id)]
+        round_id = scored[-1] if scored else None
+
+    schedule = None
+    with contextlib.suppress(ValueError, KeyError):
+        schedule = _build_schedule(cfg, MarketCalendar())
+    data = build_dashboard_data(cfg, ledger=ledger, round_id=round_id)
+    _stamp_season(data, cfg, schedule)
+    html = render_dashboard(cfg, data, refresh=args.refresh)
+    ledger.close()
+
+    if args.out:
+        _atomic_write(Path(args.out), html)
+        _print(f"wrote {args.out}")
+    try:
+        result = publish(html, repo=REPO_ROOT, branch=cfg.schedule.publish.branch)
+    except PublishError as e:
+        _print(f"ERROR: {e}")
+        return 1
+    _print(f"published {result.commit} -> {result.url or cfg.schedule.publish.branch}")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+# ledger state, for hosts with no persistent disk
+# --------------------------------------------------------------------------- #
+
+#: What has to survive between runs: the ledger is the competition's memory --
+#: results, equity curves, learned state and the Round 3 draft.
+STATE_FILES = ("competition.sqlite",)
+
+
+def cmd_state(args, cfg: CompetitionConfig) -> int:
+    """Carry the ledger between runs on an ephemeral host."""
+    from .reporting.publish import PublishError, pull_state, push_state
+
+    runs_dir = Path(args.ledger).parent
+    branch = args.branch
+
+    if args.action == "push":
+        payload: dict[str, bytes] = {}
+        for name in STATE_FILES:
+            path = runs_dir / name
+            if path.exists():
+                payload[name] = path.read_bytes()
+        if not payload:
+            _print("nothing to push: no ledger on disk yet.")
+            return 0
+        try:
+            commit = push_state(payload, repo=REPO_ROOT, branch=branch)
+        except PublishError as e:
+            _print(f"ERROR: {e}")
+            return 1
+        total = sum(len(v) for v in payload.values())
+        _print(f"pushed {len(payload)} file(s), {total / 1e6:.1f} MB "
+               f"to {branch} ({commit})")
+        return 0
+
+    # pull
+    try:
+        restored = pull_state(repo=REPO_ROOT, branch=branch, dest=runs_dir)
+    except PublishError as e:
+        _print(f"ERROR: {e}")
+        return 1
+    if not restored:
+        _print(f"no {branch} branch yet -- starting from an empty ledger.")
+        return 0
+    _print(f"restored {', '.join(restored)} from {branch}")
+    return 0
 
 
 # --------------------------------------------------------------------------- #
@@ -2132,6 +2276,11 @@ def build_parser() -> argparse.ArgumentParser:
                     help="run only the teams that have credentials")
     sn.add_argument("--force", action="store_true",
                     help="start even if account equities differ")
+    sn.add_argument("--until", default=None, metavar="HH:MM",
+                    help="absolute UTC time to suspend and exit")
+    sn.add_argument("--max-runtime", type=int, default=0,
+                    help="seconds before suspending a round and exiting "
+                         "(0 = run until the season ends)")
     sn.add_argument("--notes", default="")
     sn.set_defaults(func=cmd_season)
 
@@ -2143,6 +2292,19 @@ def build_parser() -> argparse.ArgumentParser:
     sv.add_argument("--lines", type=int, default=30,
                     help="log lines to show for `logs`")
     sv.set_defaults(func=cmd_service)
+
+    st = sub.add_parser(
+        "state", help="carry the ledger between runs on an ephemeral host")
+    st.add_argument("action", choices=["push", "pull"])
+    st.add_argument("--branch", default="season-state",
+                    help="branch the ledger is parked on")
+    st.set_defaults(func=cmd_state)
+
+    pb = sub.add_parser("publish", help="render the dashboard and push it to Pages")
+    pb.add_argument("--out", default=str(DEFAULT_DASHBOARD),
+                    help="also write the HTML here ('' to skip)")
+    pb.add_argument("--refresh", type=int, default=30)
+    pb.set_defaults(func=cmd_publish)
 
     sc = sub.add_parser("score", help="score recorded round results")
     sc.add_argument("--round", type=int, default=None)
