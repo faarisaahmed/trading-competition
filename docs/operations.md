@@ -23,6 +23,42 @@ live. In particular it fails if:
 * an account's equity is off by more than 1% from what its teams need
   ($15,000 for a three-team account, $5,000 for a single team).
 
+## Running the season unattended
+
+`comp season` runs all three rounds back to back: it waits for each opening
+bell, hands the round to the engine, lets it flatten and score at the close,
+and rolls into the next one. Nothing needs a human between the start and the
+final bell.
+
+The awkward part is that it has to actually be *running* for three weeks. Do
+not hold a terminal open for that. Install it as a background service:
+
+```bash
+comp service install
+```
+
+That writes a macOS LaunchAgent which:
+
+* starts the season at login and restarts it if it exits -- safe, because the
+  engine checkpoints every tick, so a restart rejoins the round rather than
+  restarting it;
+* wraps it in `caffeinate -ims`, preventing idle, disk and system sleep. Note
+  the missing `-d`: the *screen* may switch off, the machine may not. A Mac
+  asleep at 10am is lost trading time that nothing can recover;
+* writes to `runs/logs/season.{out,err}.log`.
+
+```bash
+comp service status      # what launchd thinks, and the pid
+comp service logs        # recent output
+comp service uninstall   # stop and remove it
+```
+
+**The one thing this cannot survive** is a closed lid. macOS sleeps a laptop
+on lid-close regardless of `caffeinate`, unless it is on mains power with an
+external display attached. If the machine is a laptop that travels, put the
+season on an always-on box instead -- any small Linux host will do, since
+nothing here is macOS-specific except this service file.
+
 ### Equalising the accounts
 
 Alpaca paper balances cannot be set over the API. Set the starting balance when

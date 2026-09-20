@@ -1541,6 +1541,71 @@ class _RoundArgs:
 
 
 # --------------------------------------------------------------------------- #
+# background service
+# --------------------------------------------------------------------------- #
+
+
+def cmd_service(args, cfg: CompetitionConfig) -> int:
+    """Install, remove or inspect the background season service."""
+    from .service import ServiceError, install, paths, status, uninstall
+
+    repo = REPO_ROOT
+    p = paths(repo)
+
+    if args.action == "status":
+        st = status(repo)
+        _print(f"label    : {st['label']}")
+        _print(f"plist    : {st['plist']}"
+               f"{'' if st['installed'] else '   (not installed)'}")
+        if st["running"]:
+            _print(f"state    : RUNNING (pid {st['pid']})")
+        elif st["installed"]:
+            _print("state    : installed but not running")
+            if st["last_exit"] is not None:
+                _print(f"last exit: {st['last_exit']}")
+        else:
+            _print("state    : not installed")
+        _print(f"logs     : {p.stdout}")
+        _print(f"           {p.stderr}")
+        return 0
+
+    if args.action == "logs":
+        for path in (p.stdout, p.stderr):
+            if not path.exists():
+                _print(f"-- {path} (no such file yet)")
+                continue
+            lines = path.read_text(errors="replace").splitlines()
+            _print(f"-- {path}  ({len(lines)} lines)")
+            for line in lines[-args.lines:]:
+                _print(f"   {line}")
+        return 0
+
+    if args.action == "uninstall":
+        removed = uninstall(repo)
+        _print("service removed." if removed else "no service was installed.")
+        return 0
+
+    # install
+    extra: list[str] = []
+    if args.no_publish:
+        extra.append("--no-publish")
+    try:
+        p = install(repo, extra_args=extra)
+    except ServiceError as e:
+        _print(f"ERROR: {e}")
+        return 1
+    _print(f"installed {p.plist}")
+    _print("")
+    _print("The season now runs in the background. It starts at login, holds")
+    _print("the Mac awake while trading, and restarts itself if it exits.")
+    _print("")
+    _print("  comp service status    what launchd thinks")
+    _print("  comp service logs      recent output")
+    _print("  comp service uninstall stop and remove it")
+    return 0
+
+
+# --------------------------------------------------------------------------- #
 # account setup
 # --------------------------------------------------------------------------- #
 
@@ -2069,6 +2134,15 @@ def build_parser() -> argparse.ArgumentParser:
                     help="start even if account equities differ")
     sn.add_argument("--notes", default="")
     sn.set_defaults(func=cmd_season)
+
+    sv = sub.add_parser(
+        "service", help="run the season in the background (macOS LaunchAgent)")
+    sv.add_argument("action", choices=["install", "uninstall", "status", "logs"])
+    sv.add_argument("--no-publish", action="store_true",
+                    help="do not push the dashboard to GitHub Pages")
+    sv.add_argument("--lines", type=int, default=30,
+                    help="log lines to show for `logs`")
+    sv.set_defaults(func=cmd_service)
 
     sc = sub.add_parser("score", help="score recorded round results")
     sc.add_argument("--round", type=int, default=None)
