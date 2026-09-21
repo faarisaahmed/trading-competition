@@ -429,3 +429,69 @@ def test_a_live_label_is_overridden_when_the_brokers_are_simulators(
     assert data.is_live is False, "a simulator-backed run must not read as live"
     assert "not a live competition" in render_dashboard(cfg, data)
     ledger.close()
+
+
+# --------------------------------------------------------------------------- #
+# a shared account is still a real account
+# --------------------------------------------------------------------------- #
+
+
+class _FakeAlpacaBroker:
+    pass
+
+
+_FakeAlpacaBroker.__name__ = "AlpacaBroker"
+
+
+class _FakeShared:
+    def __init__(self, broker):
+        self.broker = broker
+
+
+class _FakeVirtual:
+    def __init__(self, shared):
+        self.shared = shared
+
+
+_FakeVirtual.__name__ = "VirtualBroker"
+
+
+def test_a_virtual_broker_over_alpaca_reads_as_live():
+    """The inverse mistake, and just as misleading.
+
+    In shared mode every team holds a `VirtualBroker`. Judging liveness by
+    that class alone labelled a real round, with real orders on real paper
+    accounts, as 'Simulated data -- this is not a live competition'.
+    """
+    from competition.reporting.dashboard import _backing_broker
+
+    v = _FakeVirtual(_FakeShared(_FakeAlpacaBroker()))
+    assert _backing_broker(v) == "AlpacaBroker"
+
+
+def test_a_virtual_broker_over_a_simulator_still_reads_as_simulated():
+    """The guard must not be weakened into uselessness."""
+    from competition.reporting.dashboard import _backing_broker
+
+    class SimulatedBroker:
+        pass
+
+    v = _FakeVirtual(_FakeShared(SimulatedBroker()))
+    assert _backing_broker(v) == "SimulatedBroker"
+
+
+def test_an_unbacked_virtual_broker_is_not_claimed_live():
+    from competition.reporting.dashboard import _backing_broker
+
+    assert _backing_broker(_FakeVirtual(None)) == "VirtualBroker"
+
+
+def test_shared_mode_live_round_has_no_simulated_banner(cfg):
+    """End to end: the banner a visitor actually reads."""
+    from competition.reporting.dashboard import DashboardData, _banner
+
+    data = DashboardData(competition="x", rules_hash="y",
+                         generated_at=utcnow(), mode="live", broker="alpaca",
+                         ticks=190)
+    assert data.is_live is True
+    assert _banner(data) == ""

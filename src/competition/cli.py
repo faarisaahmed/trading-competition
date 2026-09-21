@@ -69,6 +69,11 @@ log = logging.getLogger("competition.cli")
 #: round still in progress. Distinct from success and from failure.
 EXIT_SUSPENDED = 75
 
+#: A session is longer than the six hours one CI job may run, so it is
+#: covered by two. These are the UTC (hour, minute) boundaries.
+HANDOVER_UTC = (16, 40)
+SESSION_END_UTC = (20, 10)
+
 DEFAULT_LEDGER = REPO_ROOT / "runs" / "competition.sqlite"
 DEFAULT_DASHBOARD = REPO_ROOT / "runs" / "dashboard.html"
 
@@ -1493,12 +1498,24 @@ def cmd_season(args, cfg: CompetitionConfig) -> int:
         # An ABSOLUTE wall-clock stop, not a relative budget. A job that
         # starts late must still finish on time, or it overlaps the next one
         # and two processes trade the same accounts.
-        try:
-            hh, mm = (int(x) for x in args.until.split(":"))
-            target = utcnow().replace(hour=hh, minute=mm, second=0, microsecond=0)
-        except ValueError:
-            _print(f"ERROR: --until wants UTC HH:MM, got {args.until!r}")
-            return 2
+        spec = args.until.strip().lower()
+        if spec == "auto":
+            # Pick the window from the clock, not from which trigger fired.
+            # A scheduled run that GitHub delays or drops entirely must still
+            # do the right thing whenever it finally starts.
+            now = utcnow()
+            hh, mm = (HANDOVER_UTC if (now.hour, now.minute) < HANDOVER_UTC
+                      else SESSION_END_UTC)
+            target = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+        else:
+            try:
+                hh, mm = (int(x) for x in spec.split(":"))
+                target = utcnow().replace(hour=hh, minute=mm,
+                                          second=0, microsecond=0)
+            except ValueError:
+                _print(f"ERROR: --until wants UTC HH:MM or 'auto', "
+                       f"got {args.until!r}")
+                return 2
         secs = (target - utcnow()).total_seconds()
         if secs <= 0:
             _print(f"--until {args.until} UTC has already passed; nothing to do.")
@@ -2277,7 +2294,8 @@ def build_parser() -> argparse.ArgumentParser:
     sn.add_argument("--force", action="store_true",
                     help="start even if account equities differ")
     sn.add_argument("--until", default=None, metavar="HH:MM",
-                    help="absolute UTC time to suspend and exit")
+                    help="absolute UTC time to suspend and exit, "
+                         "or 'auto' to pick the window from the clock")
     sn.add_argument("--max-runtime", type=int, default=0,
                     help="seconds before suspending a round and exiting "
                          "(0 = run until the season ends)")

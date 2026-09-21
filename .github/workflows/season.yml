@@ -14,11 +14,15 @@ name: Season
 
 on:
   schedule:
-    # Morning: starts 25 min before the bell, hands over at 16:40 UTC.
-    - cron: "5 13 * * 1-5"
-    # Afternoon: through to just past the close.
-    - cron: "45 16 * * 1-5"
-    # Weekend heartbeat: refresh the public countdown once a day.
+    # GitHub's scheduled runs are best-effort: they can be delayed by hours
+    # or dropped entirely. A single trigger per window is therefore not a
+    # schedule, it is a hope. Instead: fire every 20 minutes through the
+    # session, and let the concurrency lock keep exactly one alive. A dropped
+    # trigger then costs 20 minutes, not a day.
+    - cron: "*/20 13-20 * * 1-5"
+    # A couple before the bell, so an average delay still catches the open.
+    - cron: "5,25,45 12 * * 1-5"
+    # Weekend heartbeat: refresh the public countdown.
     - cron: "0 15 * * 6,0"
   workflow_dispatch:
     inputs:
@@ -27,17 +31,23 @@ on:
         required: false
         default: "20:10"
 
-# Only ever one of these at a time. Two processes trading the same three
-# accounts would be a catastrophe, not a race condition.
+# Exactly one at a time: two processes trading the same three accounts would
+# be a catastrophe, not a race condition.
+#
+# NOT cancel-in-progress. Cancelling would kill a healthy job mid-round every
+# 20 minutes. Queuing instead makes the frequent triggers self-healing: while
+# one run works, the next waits, and it takes over the moment the first hits
+# its deadline. GitHub keeps at most one pending run per group, so they cannot
+# pile up.
 concurrency:
   group: season
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   trade:
     runs-on: ubuntu-latest
     # A hard ceiling under GitHub's 6h limit; the app stops itself before this.
-    timeout-minutes: 350
+    timeout-minutes: 240
     permissions:
       contents: write        # push the dashboard and the ledger
 
@@ -79,18 +89,10 @@ jobs:
       - name: Pre-flight
         run: comp doctor --check-accounts
 
-      - name: Decide when to stop
-        id: window
-        run: |
-          case "${{ github.event.schedule }}" in
-            "5 13 * * 1-5")  echo "until=16:40" >> "$GITHUB_OUTPUT" ;;
-            "45 16 * * 1-5") echo "until=20:10" >> "$GITHUB_OUTPUT" ;;
-            "0 15 * * 6,0")  echo "until=15:10" >> "$GITHUB_OUTPUT" ;;
-            *)               echo "until=${{ inputs.until || '20:10' }}" >> "$GITHUB_OUTPUT" ;;
-          esac
-
+      # The window comes from the clock, not from which trigger fired: a run
+      # that GitHub delayed by two hours must still stop at the right time.
       - name: Run the season
-        run: comp season --until "${{ steps.window.outputs.until }}"
+        run: comp season --until "${{ inputs.until || 'auto' }}"
 
       # Even on failure: whatever was learned and traded must not be lost.
       - name: Save the ledger

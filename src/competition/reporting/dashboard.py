@@ -189,6 +189,30 @@ class DashboardData:
         return f"{self.mode or 'unknown'} / {self.broker or 'unknown'}"
 
 
+def _backing_broker(broker) -> str:
+    """The class name of the broker that actually reaches a venue.
+
+    A team in shared mode holds a `VirtualBroker`, which is a *view* of a real
+    account rather than a simulator. Naming its own class would report a live
+    round as simulated -- the inverse of the mistake this check exists to
+    prevent, and just as misleading. Follow the wrapper to what settles the
+    trade.
+    """
+    seen = set()
+    while True:
+        name = type(broker).__name__
+        if name != "VirtualBroker":
+            return name
+        if id(broker) in seen:          # defensive: never loop on a cycle
+            return name
+        seen.add(id(broker))
+        shared = getattr(broker, "shared", None)
+        inner = getattr(shared, "broker", None)
+        if inner is None:
+            return name
+        broker = inner
+
+
 def build_dashboard_data(
     cfg: CompetitionConfig,
     *,
@@ -230,7 +254,7 @@ def build_dashboard_data(
         if not data.mode:
             data.mode = str(runs[-1]["mode"] or "")
     if engine is not None and engine.teams:
-        classes = {type(rt.broker).__name__ for rt in engine.teams.values()}
+        classes = {_backing_broker(rt.broker) for rt in engine.teams.values()}
         if classes and not any(c == "AlpacaBroker" for c in classes):
             # Contradict a bogus "alpaca" label, but keep any recorded detail
             # (e.g. "sim/synthetic") -- overwriting it wholesale loses the very
