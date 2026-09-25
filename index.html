@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>2026 Model Trading Competition — Round 1</title>
+<style>
+  .viz-root {
+    color-scheme: light;
+    --surface: #fcfcfb;
+    --plane: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --up: #006300;
+    --down: #d03b3b;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --critical: #d03b3b;
+    --team-benchmark: #898781;
+    --team-gambler: #eda100;
+    --team-mean-reverter: #eb6834;
+    --team-news-hound: #008300;
+    --team-q-learner: #1baf7a;
+    --team-scalper: #e34948;
+    --team-stat-arb: #e87ba4;
+    --team-trend-rider: #2a78d6;
+    --team-vol-breakout: #4a3aa7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      color-scheme: dark;
+    --surface: #1a1a19;
+    --plane: #0d0d0d;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255,255,255,0.10);
+    --up: #0ca30c;
+    --down: #d03b3b;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --critical: #d03b3b;
+    --team-benchmark: #898781;
+    --team-gambler: #c98500;
+    --team-mean-reverter: #d95926;
+    --team-news-hound: #008300;
+    --team-q-learner: #199e70;
+    --team-scalper: #e66767;
+    --team-stat-arb: #d55181;
+    --team-trend-rider: #3987e5;
+    --team-vol-breakout: #9085e9;
+    }
+  }
+  :root[data-theme="dark"] .viz-root {
+    color-scheme: dark;
+    --surface: #1a1a19;
+    --plane: #0d0d0d;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255,255,255,0.10);
+    --up: #0ca30c;
+    --down: #d03b3b;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --critical: #d03b3b;
+    --team-benchmark: #898781;
+    --team-gambler: #c98500;
+    --team-mean-reverter: #d95926;
+    --team-news-hound: #008300;
+    --team-q-learner: #199e70;
+    --team-scalper: #e66767;
+    --team-stat-arb: #d55181;
+    --team-trend-rider: #3987e5;
+    --team-vol-breakout: #9085e9;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 22px 26px 60px;
+    background: var(--plane); color: var(--text-primary);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .num { font-variant-numeric: tabular-nums; text-align: right; }
+  h1 { font-size: 19px; margin: 0 0 2px; letter-spacing: -0.01em; }
+  h2 { font-size: 13px; margin: 0 0 12px; font-weight: 600;
+       text-transform: uppercase; letter-spacing: 0.07em;
+       color: var(--text-secondary); }
+  h3 { font-size: 14px; margin: 0; font-weight: 600; }
+  .sub { color: var(--text-secondary); font-size: 12.5px; }
+  .dim { color: var(--muted); }
+  .strong { font-weight: 650; }
+  header.top { display: flex; justify-content: space-between;
+                align-items: flex-end; gap: 20px; margin-bottom: 18px;
+                flex-wrap: wrap; }
+  .up { color: var(--up); }
+  .down { color: var(--down); }
+  .flat { color: var(--muted); }
+
+  .panel { background: var(--surface); border: 1px solid var(--border);
+            border-radius: 10px; padding: 16px 18px; margin-bottom: 16px; }
+
+  .tiles { display: grid; gap: 12px; margin-bottom: 16px;
+            grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); }
+  .tile { background: var(--surface); border: 1px solid var(--border);
+           border-radius: 10px; padding: 13px 15px; }
+  .tile-label { font-size: 11px; text-transform: uppercase;
+                 letter-spacing: 0.07em; color: var(--muted); }
+  .tile-value { font-size: 23px; font-weight: 600; margin-top: 3px;
+                 letter-spacing: -0.02em; }
+  .tile-unit { font-size: 13px; font-weight: 400; color: var(--muted);
+                margin-left: 4px; }
+  .tile-sub { font-size: 12px; color: var(--text-secondary); margin-top: 3px; }
+  .tile-value.live::after { content: ""; display: inline-block; width: 8px;
+    height: 8px; border-radius: 50%; background: var(--good); margin-left: 8px;
+    vertical-align: 3px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+          margin-right: 7px; vertical-align: 2px; background: currentColor; }
+  .status-good { color: var(--good); }
+  .status-warning { color: var(--warning); }
+  .status-critical { color: var(--critical); }
+
+  .chart-wrap { position: relative; }
+  .chart { width: 100%; height: auto; display: block; overflow: visible; }
+  .grid { stroke: var(--grid); stroke-width: 1; }
+  .axis { stroke: var(--axis); stroke-width: 1; }
+  .session-rule { stroke: var(--grid); stroke-width: 1; }
+  .baseline-ref { stroke: var(--axis); stroke-width: 1.5; }
+  .ref-label { fill: var(--muted); font-size: 10.5px; }
+  .tick { fill: var(--muted); font-size: 10.5px;
+           font-variant-numeric: tabular-nums; }
+  .tick.y { text-anchor: end; }
+  .tick.x { text-anchor: middle; }
+  .line { fill: none; stroke-width: 2; stroke-linejoin: round;
+           stroke-linecap: round; }
+  .line.benchmark { stroke-width: 1.5; opacity: 0.85; }
+  .end-dot { stroke: var(--surface); stroke-width: 2; }
+  .series-label { font-size: 11px; fill: var(--text-secondary); }
+  .label-swatch { stroke: var(--surface); stroke-width: 1; }
+  .crosshair { stroke: var(--axis); stroke-width: 1; pointer-events: none; }
+  .axis-note { font-size: 11.5px; color: var(--muted); margin: 6px 0 0;
+                max-width: 76ch; }
+  .tooltip { position: absolute; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px;
+    font-size: 12px; pointer-events: none; min-width: 264px;
+    box-shadow: 0 6px 22px rgba(0,0,0,0.13); z-index: 5; }
+  .tip-head { color: var(--muted); font-size: 11px; margin-bottom: 6px;
+               font-variant-numeric: tabular-nums; }
+  .tip-row { display: flex; align-items: center; gap: 7px;
+              line-height: 1.75; }
+  .tip-name { flex: 1; color: var(--text-secondary); white-space: nowrap; }
+  .tip-val, .tip-ret { font-variant-numeric: tabular-nums; }
+  .tip-ret { min-width: 58px; text-align: right; }
+
+  table.data { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.data th { text-align: left; font-weight: 600; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+    padding: 0 10px 8px; border-bottom: 1px solid var(--border);
+    white-space: nowrap; }
+  table.data th.num { text-align: right; }
+  table.data td { padding: 7px 10px; border-bottom: 1px solid var(--border); }
+  table.data tbody tr:last-child td { border-bottom: none; }
+  table.data tr.unscored { color: var(--text-secondary); }
+  table.tape td { padding: 5px 10px; font-size: 12.5px; }
+  .reason { max-width: 44ch; overflow: hidden; text-overflow: ellipsis;
+             white-space: nowrap; }
+  .side-buy { color: var(--up); font-weight: 600; }
+  .side-sell { color: var(--down); font-weight: 600; }
+
+  .swatch { display: inline-block; width: 10px; height: 10px;
+             border-radius: 3px; margin-right: 8px; vertical-align: 0; }
+  .swatch.sm { width: 8px; height: 8px; margin-right: 6px; }
+  .badge { font-size: 10.5px; padding: 1px 6px; border-radius: 20px;
+            margin-left: 8px; border: 1px solid currentColor; }
+  .badge.critical { color: var(--critical); }
+  .badge.warning { color: var(--warning); }
+
+  .cards { display: grid; gap: 12px; margin-bottom: 16px;
+            grid-template-columns: repeat(auto-fit, minmax(292px, 1fr)); }
+  .card { background: var(--surface); border: 1px solid var(--border);
+           border-radius: 10px; padding: 13px 15px; }
+  .card header { display: flex; align-items: center; gap: 2px;
+                  margin-bottom: 9px; }
+  .card-ret { margin-left: auto; font-variant-numeric: tabular-nums;
+               font-weight: 600; }
+  .card dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px;
+              margin: 0; font-size: 12.5px; }
+  .card dt { color: var(--muted); white-space: nowrap; }
+  .card dd { margin: 0; overflow-wrap: anywhere; }
+  .banner { background: var(--surface); border: 1px solid var(--warning);
+             border-left: 4px solid var(--warning); border-radius: 8px;
+             padding: 11px 15px; margin-bottom: 16px; font-size: 13px;
+             color: var(--text-secondary); }
+  .banner strong { color: var(--text-primary); }
+  .empty { color: var(--muted); padding: 34px 0; text-align: center; }
+  footer { color: var(--muted); font-size: 11.5px; margin-top: 22px;
+            display: flex; gap: 16px; flex-wrap: wrap; }
+
+  .banner.quiet { border-color: var(--border); }
+
+  /* ---- hero ---------------------------------------------------------- */
+  .hero {
+    display: flex; justify-content: space-between; align-items: center;
+    gap: 24px; flex-wrap: wrap; padding: 20px 24px; margin-bottom: 16px;
+    border-radius: 14px; border: 1px solid var(--border);
+    background: linear-gradient(135deg, var(--surface), var(--plane));
+  }
+  .hero-title {
+    font-size: 26px; font-weight: 700; letter-spacing: -.01em;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  }
+  .badge {
+    font-size: 11px; font-weight: 600; letter-spacing: .1em;
+    text-transform: uppercase; padding: 4px 10px; border-radius: 999px;
+    border: 1px solid var(--border); color: var(--text-secondary);
+  }
+  .badge.live {
+    border-color: var(--good); color: var(--good);
+    display: inline-flex; align-items: center; gap: 7px;
+  }
+  .badge .dot {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--good);
+    animation: pulse 1.8s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: .35; transform: scale(.78); }
+  }
+  .hero-round { margin-top: 12px; max-width: 420px; }
+  .hero-round-name { font-size: 13px; color: var(--text-secondary); }
+  .hero-round-sub { font-size: 11px; color: var(--muted); margin-top: 5px; }
+  .progress {
+    height: 6px; border-radius: 99px; background: var(--grid);
+    margin-top: 8px; overflow: hidden;
+  }
+  .progress span {
+    display: block; height: 100%; border-radius: 99px;
+    background: var(--good); transition: width .8s ease;
+  }
+  .hero-clock { text-align: right; }
+  .hero-clock-label {
+    font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--text-secondary);
+  }
+  .hero-clock-value {
+    font-size: 42px; font-weight: 700; line-height: 1.1;
+    font-variant-numeric: tabular-nums; color: var(--text-primary);
+  }
+  .hero-clock-when { font-size: 11px; color: var(--muted); }
+
+  /* ---- tabs ---------------------------------------------------------- */
+  .tabs {
+    display: flex; gap: 4px; margin-bottom: 18px; flex-wrap: wrap;
+    border-bottom: 1px solid var(--border);
+  }
+  .tab {
+    appearance: none; background: none; border: 0; cursor: pointer;
+    font: inherit; font-size: 13px; font-weight: 600; letter-spacing: .01em;
+    color: var(--text-secondary); padding: 10px 16px;
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .tab:hover { color: var(--text-primary); }
+  .tab.on { color: var(--text-primary); border-bottom-color: var(--good); }
+  .panel-set.hidden { display: none; }
+
+  /* ---- podium -------------------------------------------------------- */
+  .podium {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+    align-items: end; margin-bottom: 18px;
+  }
+  .step { text-align: center; }
+  .step-team {
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    font-weight: 600; font-size: 15px;
+  }
+  .step-ret {
+    font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums;
+    margin: 2px 0;
+  }
+  .step-eq {
+    font-size: 12px; color: var(--muted); margin-bottom: 8px;
+    font-variant-numeric: tabular-nums;
+  }
+  .block {
+    border-radius: 10px 10px 0 0; display: flex; align-items: flex-start;
+    justify-content: center; padding-top: 10px;
+    border: 1px solid var(--border); border-bottom: 0;
+    width: min(100%, 230px); margin: 0 auto;
+  }
+  .h1 .block { height: 104px; }
+  .h2 .block { height: 74px; }
+  .h3 .block { height: 54px; }
+  .block .place {
+    font-size: 12px; font-weight: 700; letter-spacing: .09em;
+    text-transform: uppercase; color: #12151a;
+  }
+  .block.gold { background: #e8b53a; border-color: #e8b53a; }
+  .block.silver { background: #b9c0c9; border-color: #b9c0c9; }
+  .block.bronze { background: #c98a5e; border-color: #c98a5e; }
+
+  /* ---- the race ------------------------------------------------------ */
+  .race { display: flex; flex-direction: column; gap: 3px; }
+  .race-axis {
+    display: flex; justify-content: space-between; font-size: 10px;
+    letter-spacing: .09em; text-transform: uppercase; color: var(--muted);
+    padding: 0 0 6px;
+  }
+  .race-row {
+    display: grid; align-items: center; gap: 12px;
+    grid-template-columns: 26px minmax(150px, 210px) 1fr 78px 96px;
+    padding: 5px 0; border-bottom: 1px solid var(--grid);
+  }
+  .race-place { color: var(--muted); font-size: 12px; text-align: right; }
+  .race-name {
+    display: flex; align-items: center; gap: 8px; font-weight: 600;
+    font-size: 13px; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .race-name em {
+    color: var(--muted); font-weight: 400; font-size: 10px;
+    letter-spacing: .06em; text-transform: uppercase; margin-left: 2px;
+  }
+  .race-track {
+    position: relative; height: 16px; background: var(--grid);
+    border-radius: 4px;
+  }
+  /* Zero sits in the middle: bars grow right for gains, left for losses. */
+  .race-track::before {
+    content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px;
+    width: 1px; background: var(--axis);
+  }
+  .race-bar {
+    position: absolute; top: 0; height: 100%; border-radius: 4px;
+    transition: width .9s cubic-bezier(.22, 1, .36, 1);
+  }
+  .race-bar.pos { left: 50%; background: var(--up); }
+  .race-bar.neg { right: 50%; background: var(--down); }
+  .race-ret, .race-eq { text-align: right; font-size: 13px; }
+  .race-eq { color: var(--text-secondary); }
+  .medal {
+    width: 9px; height: 9px; border-radius: 50%; display: inline-block;
+    flex: 0 0 auto;
+  }
+  .medal.gold { background: #e8b53a; }
+  .medal.silver { background: #b9c0c9; }
+  .medal.bronze { background: #c98a5e; }
+
+  /* ---- dossiers ------------------------------------------------------ */
+  .dossiers {
+    display: grid; gap: 14px;
+    grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  }
+  .dossier {
+    border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px;
+    background: var(--surface);
+  }
+  .dossier header {
+    display: flex; align-items: center; gap: 9px; margin-bottom: 10px;
+  }
+  .dossier h3 { margin: 0; font-size: 15px; }
+  .dossier-rank {
+    font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums;
+  }
+  .dossier-ret {
+    margin-left: auto; font-size: 17px; font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .tagline {
+    margin: 0 0 8px; font-style: italic; font-size: 13px;
+    color: var(--text-primary);
+  }
+  .philosophy {
+    margin: 0 0 12px; font-size: 12px; line-height: 1.55;
+    color: var(--text-secondary);
+  }
+  .dossier-stats {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px;
+    margin: 0 0 10px;
+  }
+  .dossier-stats dt {
+    font-size: 10px; letter-spacing: .07em; text-transform: uppercase;
+    color: var(--muted);
+  }
+  .dossier-stats dd { margin: 2px 0 0; font-size: 13px; font-weight: 600; }
+  .dossier-holdings {
+    font-size: 11px; color: var(--text-secondary); padding-top: 7px;
+    border-top: 1px solid var(--grid);
+  }
+  .dossier-holdings span {
+    color: var(--muted); text-transform: uppercase; letter-spacing: .07em;
+    margin-right: 6px; font-size: 10px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .race-bar, .progress span { transition: none; }
+    .badge .dot { animation: none; }
+  }
+
+  @media (max-width: 720px) {
+    .race-row { grid-template-columns: 22px 1fr 70px; }
+    .race-track, .race-eq { display: none; }
+    .hero-clock { text-align: left; }
+    .hero-clock-value { font-size: 32px; }
+  }
+  .clock {
+    display: flex; align-items: baseline; gap: 20px; flex-wrap: wrap;
+    padding: 14px 18px; margin: 0 0 18px; border-radius: 10px;
+    background: var(--surface); border: 1px solid var(--border);
+  }
+  .clock.live { border-color: var(--good); }
+  .clock-label {
+    font-size: 11px; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--text-secondary);
+  }
+  .clock-value {
+    font-size: 30px; font-weight: 600; font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+  }
+  .clock.live .clock-value { color: var(--good); }
+  .clock-when { font-size: 12px; color: var(--muted); }
+  .clock.done .clock-label { color: var(--text-primary); font-size: 16px; }
+  table.plan { width: 100%; border-collapse: collapse; }
+  table.plan th {
+    text-align: left; font-size: 11px; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--text-secondary);
+    padding: 6px 10px; border-bottom: 1px solid var(--border);
+  }
+  table.plan td { padding: 8px 10px; border-bottom: 1px solid var(--grid); }
+  table.plan tr.done td { color: var(--muted); }
+  .pill {
+    display: inline-block; padding: 2px 9px; border-radius: 999px;
+    font-size: 11px; letter-spacing: .04em; border: 1px solid var(--border);
+    color: var(--text-secondary);
+  }
+  .pill.live { border-color: var(--good); color: var(--good); }
+  .pill.done { color: var(--muted); }
+</style>
+</head>
+<body class="viz-root" data-palette="#2a78d6,#eb6834,#1baf7a,#eda100,#e87ba4,#008300,#4a3aa7,#e34948">
+
+<section class="hero">
+  <div class="hero-left">
+    <div class="hero-title">2026 Model Trading Competition <span class="badge">between rounds</span></div>
+    <div class="hero-round"><div class="hero-round-name">Round 1 &middot; The Big Three</div><div class="progress"><span style="width:80.0%"></span></div><div class="hero-round-sub">day 4 of 5</div></div>
+  </div>
+  <div class="hero-clock"><div class="hero-clock-label">Next round starts in</div><div class="hero-clock-value num" data-deadline="2026-09-28T13:30:00+00:00">&mdash;</div><div class="hero-clock-when">Mon 28 Sep 13:30 UTC</div></div>
+</section>
+
+
+<nav class="tabs" role="tablist"><button class="tab on" data-tab="leaderboard">Leaderboard</button><button class="tab" data-tab="teams">The Field</button><button class="tab" data-tab="season">Season</button><button class="tab" data-tab="activity">Activity</button></nav>
+
+<section class="panel-set" id="tab-leaderboard">
+  <section class="podium"><div class="step h2"><div class="step-team"><span class="swatch" style="background:var(--team-q-learner)"></span><span class="step-name">Q-Learner</span></div><div class="step-ret up">+1.40%</div><div class="step-eq">$5,069.90</div><div class="block silver"><span class="place">2nd</span></div></div><div class="step h1"><div class="step-team"><span class="swatch" style="background:var(--team-news-hound)"></span><span class="step-name">News Hound</span></div><div class="step-ret up">+1.44%</div><div class="step-eq">$5,072.11</div><div class="block gold"><span class="place">1st</span></div></div><div class="step h3"><div class="step-team"><span class="swatch" style="background:var(--team-gambler)"></span><span class="step-name">The Gambler</span></div><div class="step-ret up">+1.13%</div><div class="step-eq">$5,056.44</div><div class="block bronze"><span class="place">3rd</span></div></div></section>
+  <section class="tiles"><div class="tile"><div class="tile-label">Round 1</div><div class="tile-value">Day 5<span class="tile-unit">/ 5</span></div><div class="tile-sub">The Big Three</div></div><div class="tile"><div class="tile-label">Market</div><div class="tile-value ">closed</div><div class="tile-sub">opens in 2d 16h</div></div><div class="tile"><div class="tile-label">Leading</div><div class="tile-value">News Hound</div><div class="tile-sub up">+1.44% · $5,072.11</div></div><div class="tile"><div class="tile-label">Field spread</div><div class="tile-value">2.09<span class="tile-unit">pp</span></div><div class="tile-sub">first to last</div></div><div class="tile"><div class="tile-label">Beating the benchmark</div><div class="tile-value">3<span class="tile-unit">/ 8</span></div><div class="tile-sub up">benchmark +0.84%</div></div><div class="tile"><div class="tile-label">Engine</div><div class="tile-value status-good"><span class="dot"></span>healthy</div><div class="tile-sub">3,456 ticks</div></div></section>
+  <section class="panel">
+    <h2>Standings — Mon 21 Sep – Fri 25 Sep · session 4/5</h2>
+    <div class="race"><div class="race-axis"><span>behind</span><span>ahead</span></div><div class="race-row"><div class="race-place num">1</div><div class="race-name"><span class="medal gold"></span><span class="swatch" style="background:var(--team-news-hound)"></span>News Hound</div><div class="race-track"><div class="race-bar pos" style="width:50.00%"></div></div><div class="race-ret num up">+1.44%</div><div class="race-eq num">$5,072.11</div></div><div class="race-row"><div class="race-place num">2</div><div class="race-name"><span class="medal silver"></span><span class="swatch" style="background:var(--team-q-learner)"></span>Q-Learner</div><div class="race-track"><div class="race-bar pos" style="width:48.47%"></div></div><div class="race-ret num up">+1.40%</div><div class="race-eq num">$5,069.90</div></div><div class="race-row"><div class="race-place num">3</div><div class="race-name"><span class="medal bronze"></span><span class="swatch" style="background:var(--team-gambler)"></span>The Gambler</div><div class="race-track"><div class="race-bar pos" style="width:39.14%"></div></div><div class="race-ret num up">+1.13%</div><div class="race-eq num">$5,056.44</div></div><div class="race-row"><div class="race-place num">4</div><div class="race-name"><span class="swatch" style="background:var(--team-scalper)"></span>The Scalper</div><div class="race-track"><div class="race-bar pos" style="width:23.95%"></div></div><div class="race-ret num up">+0.69%</div><div class="race-eq num">$5,034.54</div></div><div class="race-row"><div class="race-place num">5</div><div class="race-name"><span class="swatch" style="background:var(--team-vol-breakout)"></span>Vol Breakout</div><div class="race-track"><div class="race-bar pos" style="width:17.37%"></div></div><div class="race-ret num up">+0.50%</div><div class="race-eq num">$5,025.05</div></div><div class="race-row"><div class="race-place num">6</div><div class="race-name"><span class="swatch" style="background:var(--team-mean-reverter)"></span>Mean Reverter</div><div class="race-track"><div class="race-bar pos" style="width:7.30%"></div></div><div class="race-ret num up">+0.21%</div><div class="race-eq num">$5,010.53</div></div><div class="race-row"><div class="race-place num">7</div><div class="race-name"><span class="swatch" style="background:var(--team-trend-rider)"></span>Trend Rider</div><div class="race-track"><div class="race-bar neg" style="width:5.34%"></div></div><div class="race-ret num down">-0.15%</div><div class="race-eq num">$4,992.30</div></div><div class="race-row"><div class="race-place num">8</div><div class="race-name"><span class="swatch" style="background:var(--team-stat-arb)"></span>Stat Arb</div><div class="race-track"><div class="race-bar neg" style="width:22.55%"></div></div><div class="race-ret num down">-0.65%</div><div class="race-eq num">$4,967.48</div></div><div class="race-row"><div class="race-place num">&mdash;</div><div class="race-name"><span class="swatch" style="background:var(--team-benchmark)"></span>Buy &amp; Hold (benchmark)</div><div class="race-track"><div class="race-bar pos" style="width:29.04%"></div></div><div class="race-ret num up">+0.84%</div><div class="race-eq num">$5,041.88</div></div></div>
+  </section>
+  <section class="panel">
+    <h2>Equity this round</h2>
+    <div class="chart-wrap"><svg class="chart" viewBox="0 0 1080 380" role="img" aria-label="Equity curve for every team this round" preserveAspectRatio="xMidYMid meet"><line class="grid" x1="68" y1="342.0" x2="930" y2="342.0"/><text class="tick y" x="58" y="346.0">$4,916</text><line class="grid" x1="68" y1="277.2" x2="930" y2="277.2"/><text class="tick y" x="58" y="281.2">$4,950</text><line class="grid" x1="68" y1="212.4" x2="930" y2="212.4"/><text class="tick y" x="58" y="216.4">$4,984</text><line class="grid" x1="68" y1="147.6" x2="930" y2="147.6"/><text class="tick y" x="58" y="151.6">$5,018</text><line class="grid" x1="68" y1="82.8" x2="930" y2="82.8"/><text class="tick y" x="58" y="86.8">$5,052</text><line class="grid" x1="68" y1="18.0" x2="930" y2="18.0"/><text class="tick y" x="58" y="22.0">$5,086</text><line class="baseline-ref" x1="68" y1="182.0" x2="930" y2="182.0"/><text class="tick x" x="68.0" y="362">09-21</text><line class="session-rule" x1="322.8" y1="18" x2="322.8" y2="342"/><text class="tick x" x="322.8" y="362">09-22</text><line class="session-rule" x1="484.1" y1="18" x2="484.1" y2="342"/><text class="tick x" x="484.1" y="362">09-23</text><line class="session-rule" x1="645.5" y1="18" x2="645.5" y2="342"/><text class="tick x" x="645.5" y="362">09-24</text><line class="session-rule" x1="794.1" y1="18" x2="794.1" y2="342"/><text class="tick x" x="794.1" y="362">09-25</text><line class="axis" x1="68" y1="342" x2="930" y2="342"/><polyline class="line benchmark" points="68.0,182.0 72.2,198.4 76.5,190.3 80.7,193.1 85.0,180.9 89.2,178.3 93.5,191.1 97.7,193.2 102.0,173.9 106.2,170.9 110.5,162.0 114.7,164.6 119.0,166.2 123.2,162.3 127.4,165.4 131.7,156.0 135.9,159.0 140.2,169.7 144.4,163.3 148.7,168.0 152.9,153.4 157.2,155.5 161.4,145.4 165.7,160.9 169.9,152.1 174.2,151.7 178.4,154.1 182.7,139.7 186.9,143.4 191.1,145.1 195.4,142.7 199.6,146.6 203.9,147.9 208.1,133.8 212.4,139.1 216.6,137.2 220.9,136.2 225.1,144.4 229.4,139.1 233.6,143.6 237.9,146.8 242.1,139.7 246.3,143.2 250.6,151.2 254.8,144.5 259.1,144.5 263.3,146.8 267.6,144.4 271.8,152.5 276.1,149.4 280.3,140.1 284.6,147.2 288.8,135.2 293.1,124.2 297.3,117.3 301.5,127.5 305.8,129.2 310.0,113.8 314.3,133.8 318.5,123.8 322.8,152.9 327.0,157.0 331.3,152.1 335.5,154.3 339.8,151.1 344.0,156.5 348.3,154.9 352.5,148.4 356.7,156.2 361.0,158.9 365.2,159.1 369.5,156.1 373.7,151.5 378.0,140.5 382.2,151.3 386.5,159.7 390.7,136.6 395.0,140.6 399.2,134.6 403.5,141.6 407.7,133.8 412.0,141.0 416.2,133.4 420.4,131.0 424.7,135.6 428.9,157.9 433.2,154.1 437.4,155.7 441.7,151.4 445.9,148.6 450.2,151.5 454.4,143.1 458.7,142.1 462.9,144.1 467.2,149.3 471.4,148.4 475.6,158.0 479.9,156.6 484.1,298.5 488.4,313.1 492.6,304.3 496.9,301.5 501.1,296.4 505.4,293.9 509.6,289.4 513.9,297.6 518.1,311.0 522.4,306.9 526.6,308.9 530.8,286.1 535.1,288.2 539.3,286.9 543.6,287.0 547.8,285.8 552.1,285.0 556.3,288.1 560.6,286.4 564.8,280.7 569.1,284.7 573.3,291.9 577.6,285.0 581.8,280.4 586.0,284.1 590.3,277.4 594.5,282.5 598.8,282.2 603.0,286.8 607.3,300.1 611.5,293.9 615.8,294.2 620.0,288.5 624.3,300.4 628.5,311.0 632.8,301.0 637.0,314.7 641.3,249.5 645.5,271.6 649.7,272.3 654.0,266.0 658.2,281.5 662.5,284.8 666.7,282.7 671.0,294.9 675.2,293.5 679.5,306.0 683.7,305.0 688.0,287.9 692.2,290.6 696.5,293.5 700.7,290.5 704.9,276.7 709.2,283.4 713.4,280.7 717.7,281.5 721.9,280.6 726.2,280.9 730.4,272.0 734.7,272.4 738.9,273.8 743.2,285.5 747.4,283.3 751.7,276.3 755.9,271.6 760.1,267.7 764.4,269.8 768.6,277.7 772.9,275.9 777.1,279.7 781.4,276.3 785.6,279.5 789.9,324.6 794.1,113.1 798.4,115.6 802.6,113.7 806.9,118.4 811.1,108.5 815.3,109.9 819.6,113.1 823.8,114.8 828.1,114.2 832.3,112.2 836.6,112.1 840.8,103.0 845.1,101.0 849.3,105.0 853.6,97.0 857.8,100.2 862.1,106.6 866.3,99.4 870.6,104.2 874.8,103.9 879.0,106.1 883.3,111.0 887.5,112.8 891.8,108.6 896.0,99.7 900.3,111.9 904.5,111.1 908.8,129.1 913.0,125.2 917.3,123.0 921.5,107.0 925.8,100.5 930.0,102.6" stroke="var(--team-benchmark)"/><circle class="end-dot" cx="930.0" cy="102.6" r="4.5" fill="var(--team-benchmark)"/><polyline class="line" points="68.0,182.0 72.2,182.0 76.5,182.0 80.7,182.0 85.0,182.0 89.2,182.0 93.5,182.0 97.7,182.0 102.0,182.0 106.2,182.0 110.5,182.0 114.7,182.0 119.0,182.0 123.2,182.0 127.4,182.0 131.7,182.0 135.9,182.0 140.2,182.0 144.4,182.0 148.7,182.0 152.9,182.0 157.2,182.0 161.4,182.0 165.7,182.0 169.9,182.0 174.2,182.0 178.4,182.0 182.7,182.0 186.9,182.0 191.1,182.0 195.4,182.0 199.6,182.0 203.9,182.0 208.1,182.0 212.4,182.0 216.6,182.0 220.9,182.0 225.1,182.0 229.4,182.0 233.6,182.0 237.9,182.0 242.1,182.0 246.3,182.0 250.6,182.0 254.8,182.0 259.1,182.0 263.3,182.0 267.6,182.0 271.8,182.0 276.1,182.0 280.3,182.0 284.6,182.0 288.8,182.0 293.1,182.0 297.3,182.0 301.5,182.0 305.8,182.0 310.0,182.0 314.3,182.0 318.5,182.0 322.8,182.0 327.0,183.3 331.3,184.8 335.5,182.8 339.8,185.8 344.0,180.0 348.3,178.4 352.5,178.6 356.7,177.4 361.0,178.7 365.2,183.1 369.5,179.1 373.7,173.4 378.0,169.0 382.2,170.1 386.5,177.6 390.7,171.1 395.0,171.1 399.2,172.5 403.5,173.2 407.7,177.0 412.0,173.6 416.2,170.8 420.4,170.2 424.7,170.3 428.9,177.4 433.2,176.9 437.4,177.3 441.7,176.6 445.9,172.9 450.2,173.7 454.4,172.4 458.7,170.6 462.9,170.6 467.2,174.6 471.4,175.6 475.6,176.7 479.9,182.4 484.1,254.1 488.4,259.6 492.6,257.7 496.9,257.1 501.1,255.6 505.4,257.7 509.6,257.1 513.9,257.4 518.1,256.2 522.4,257.0 526.6,258.0 530.8,252.5 535.1,252.1 539.3,252.9 543.6,253.2 547.8,251.4 552.1,249.9 556.3,248.8 560.6,249.0 564.8,249.0 569.1,249.0 573.3,249.0 577.6,249.0 581.8,249.0 586.0,249.0 590.3,249.0 594.5,249.0 598.8,249.0 603.0,249.0 607.3,249.0 611.5,249.0 615.8,249.0 620.0,249.0 624.3,249.0 628.5,249.0 632.8,249.0 637.0,249.0 641.3,249.0 645.5,249.0 649.7,249.0 654.0,249.0 658.2,249.0 662.5,249.0 666.7,249.0 671.0,249.0 675.2,249.0 679.5,249.0 683.7,249.0 688.0,249.0 692.2,249.0 696.5,249.0 700.7,249.0 704.9,249.0 709.2,249.0 713.4,249.0 717.7,249.0 721.9,249.0 726.2,249.0 730.4,249.0 734.7,249.0 738.9,249.0 743.2,249.0 747.4,249.0 751.7,249.0 755.9,249.0 760.1,249.0 764.4,249.0 768.6,249.0 772.9,249.0 777.1,249.0 781.4,249.0 785.6,249.0 789.9,249.0 794.1,249.0 798.4,249.0 802.6,251.2 806.9,251.6 811.1,240.5 815.3,242.7 819.6,243.9 823.8,243.4 828.1,245.1 832.3,248.6 836.6,248.6 840.8,246.5 845.1,241.1 849.3,247.6 853.6,247.0 857.8,248.7 862.1,251.9 866.3,247.1 870.6,249.7 874.8,247.3 879.0,247.3 883.3,247.3 887.5,247.3 891.8,245.7 896.0,239.7 900.3,251.1 904.5,245.2 908.8,246.6 913.0,260.4 917.3,254.6 921.5,242.8 925.8,241.9 930.0,243.8" stroke="var(--team-stat-arb)"/><circle class="end-dot" cx="930.0" cy="243.8" r="4.5" fill="var(--team-stat-arb)"/><polyline class="line" points="68.0,182.0 72.2,187.6 76.5,187.8 80.7,186.3 85.0,174.9 89.2,171.5 93.5,178.7 97.7,179.4 102.0,168.1 106.2,165.4 110.5,160.3 114.7,164.5 119.0,166.3 123.2,169.3 127.4,171.2 131.7,158.0 135.9,155.7 140.2,168.9 144.4,163.5 148.7,171.5 152.9,161.0 157.2,163.2 161.4,159.9 165.7,167.6 169.9,167.2 174.2,167.5 178.4,168.6 182.7,155.7 186.9,160.2 191.1,162.2 195.4,159.7 199.6,163.2 203.9,165.4 208.1,154.6 212.4,160.3 216.6,158.2 220.9,159.4 225.1,167.1 229.4,157.2 233.6,165.9 237.9,171.9 242.1,171.2 246.3,170.1 250.6,173.0 254.8,172.0 259.1,169.0 263.3,163.0 267.6,167.8 271.8,171.0 276.1,164.7 280.3,163.6 284.6,179.7 288.8,160.5 293.1,160.5 297.3,160.5 301.5,160.5 305.8,160.5 310.0,160.4 314.3,157.4 318.5,162.7 322.8,171.9 327.0,171.3 331.3,171.6 335.5,171.6 339.8,171.6 344.0,171.6 348.3,171.6 352.5,171.6 356.7,171.6 361.0,173.7 365.2,168.0 369.5,170.9 373.7,174.0 378.0,172.7 382.2,173.3 386.5,171.7 390.7,160.7 395.0,164.5 399.2,160.0 403.5,167.1 407.7,157.5 412.0,161.6 416.2,159.7 420.4,150.2 424.7,150.1 428.9,165.1 433.2,162.5 437.4,162.8 441.7,159.6 445.9,161.1 450.2,162.9 454.4,161.3 458.7,162.1 462.9,162.9 467.2,155.6 471.4,153.8 475.6,162.2 479.9,161.2 484.1,162.9 488.4,162.9 492.6,162.9 496.9,162.9 501.1,162.9 505.4,162.9 509.6,162.9 513.9,162.9 518.1,162.9 522.4,162.9 526.6,162.9 530.8,162.9 535.1,165.5 539.3,164.1 543.6,163.4 547.8,166.2 552.1,165.3 556.3,166.8 560.6,160.9 564.8,161.7 569.1,163.2 573.3,163.6 577.6,161.9 581.8,150.8 586.0,152.8 590.3,149.7 594.5,154.2 598.8,153.7 603.0,152.2 607.3,172.1 611.5,158.9 615.8,157.7 620.0,157.8 624.3,171.3 628.5,173.5 632.8,160.8 637.0,173.8 641.3,150.7 645.5,196.2 649.7,197.8 654.0,191.9 658.2,204.8 662.5,205.1 666.7,206.6 671.0,213.9 675.2,211.8 679.5,214.3 683.7,215.1 688.0,210.6 692.2,209.9 696.5,207.5 700.7,203.7 704.9,201.8 709.2,206.1 713.4,207.6 717.7,208.1 721.9,206.3 726.2,203.8 730.4,201.6 734.7,204.1 738.9,203.5 743.2,213.6 747.4,212.7 751.7,210.9 755.9,205.5 760.1,203.9 764.4,205.6 768.6,211.5 772.9,209.6 777.1,213.1 781.4,211.2 785.6,208.9 789.9,234.1 794.1,196.5 798.4,197.2 802.6,197.7 806.9,202.0 811.1,196.4 815.3,197.2 819.6,200.4 823.8,201.3 828.1,202.1 832.3,202.3 836.6,200.0 840.8,194.2 845.1,197.8 849.3,194.5 853.6,188.3 857.8,189.0 862.1,193.0 866.3,190.9 870.6,192.5 874.8,194.7 879.0,196.3 883.3,201.5 887.5,202.7 891.8,199.9 896.0,200.7 900.3,205.2 904.5,206.6 908.8,207.5 913.0,206.6 917.3,206.0 921.5,203.3 925.8,201.0 930.0,196.7" stroke="var(--team-trend-rider)"/><circle class="end-dot" cx="930.0" cy="196.7" r="4.5" fill="var(--team-trend-rider)"/><polyline class="line" points="68.0,182.0 72.2,182.0 76.5,182.0 80.7,182.0 85.0,182.0 89.2,182.0 93.5,182.0 97.7,182.0 102.0,182.0 106.2,182.0 110.5,182.0 114.7,182.0 119.0,182.0 123.2,182.0 127.4,182.0 131.7,182.0 135.9,182.0 140.2,182.0 144.4,182.0 148.7,182.0 152.9,182.0 157.2,182.0 161.4,182.0 165.7,182.0 169.9,182.0 174.2,182.0 178.4,182.0 182.7,182.0 186.9,182.0 191.1,182.0 195.4,182.0 199.6,182.0 203.9,182.0 208.1,182.0 212.4,182.0 216.6,182.0 220.9,182.0 225.1,182.0 229.4,182.0 233.6,182.0 237.9,182.0 242.1,182.0 246.3,182.0 250.6,182.0 254.8,182.0 259.1,182.0 263.3,182.0 267.6,182.0 271.8,182.0 276.1,182.0 280.3,182.0 284.6,182.0 288.8,182.0 293.1,182.0 297.3,182.0 301.5,182.0 305.8,182.0 310.0,182.0 314.3,182.0 318.5,182.0 322.8,182.0 327.0,182.0 331.3,182.0 335.5,182.0 339.8,182.0 344.0,182.0 348.3,182.0 352.5,182.0 356.7,182.0 361.0,182.0 365.2,182.0 369.5,182.0 373.7,182.0 378.0,182.0 382.2,182.0 386.5,182.0 390.7,182.0 395.0,182.0 399.2,182.0 403.5,182.0 407.7,182.0 412.0,182.0 416.2,182.0 420.4,182.0 424.7,182.0 428.9,182.0 433.2,182.0 437.4,182.0 441.7,182.0 445.9,182.0 450.2,182.0 454.4,182.0 458.7,182.0 462.9,182.0 467.2,182.0 471.4,182.0 475.6,182.0 479.9,182.0 484.1,182.0 488.4,182.0 492.6,182.0 496.9,182.0 501.1,182.0 505.4,182.0 509.6,182.0 513.9,182.0 518.1,182.0 522.4,182.0 526.6,182.0 530.8,182.0 535.1,182.0 539.3,182.0 543.6,182.0 547.8,182.0 552.1,182.0 556.3,182.0 560.6,182.0 564.8,182.0 569.1,182.0 573.3,182.0 577.6,182.0 581.8,182.0 586.0,182.0 590.3,182.0 594.5,182.0 598.8,182.0 603.0,182.0 607.3,182.0 611.5,182.0 615.8,182.0 620.0,182.5 624.3,180.7 628.5,180.8 632.8,177.8 637.0,180.1 641.3,176.2 645.5,160.9 649.7,162.1 654.0,162.1 658.2,162.1 662.5,162.1 666.7,162.1 671.0,162.1 675.2,162.1 679.5,162.1 683.7,162.1 688.0,162.1 692.2,162.1 696.5,162.1 700.7,162.1 704.9,162.1 709.2,162.1 713.4,162.1 717.7,162.1 721.9,162.1 726.2,162.1 730.4,162.1 734.7,162.1 738.9,162.1 743.2,162.1 747.4,162.1 751.7,162.1 755.9,162.1 760.1,162.1 764.4,162.1 768.6,162.1 772.9,162.1 777.1,162.1 781.4,162.1 785.6,162.1 789.9,162.1 794.1,162.1 798.4,162.1 802.6,162.1 806.9,162.1 811.1,162.1 815.3,162.1 819.6,162.1 823.8,162.1 828.1,162.1 832.3,162.1 836.6,162.1 840.8,162.1 845.1,162.1 849.3,162.1 853.6,162.1 857.8,162.1 862.1,162.1 866.3,162.1 870.6,162.1 874.8,162.1 879.0,162.1 883.3,162.1 887.5,162.1 891.8,162.1 896.0,162.1 900.3,162.1 904.5,162.1 908.8,162.1 913.0,162.1 917.3,162.1 921.5,162.1 925.8,162.1 930.0,162.1" stroke="var(--team-mean-reverter)"/><circle class="end-dot" cx="930.0" cy="162.1" r="4.5" fill="var(--team-mean-reverter)"/><polyline class="line" points="68.0,182.0 72.2,182.0 76.5,182.0 80.7,182.0 85.0,182.0 89.2,182.0 93.5,182.0 97.7,182.0 102.0,182.0 106.2,182.0 110.5,182.0 114.7,182.0 119.0,182.0 123.2,182.0 127.4,182.0 131.7,182.0 135.9,182.0 140.2,182.0 144.4,182.0 148.7,182.0 152.9,182.0 157.2,182.0 161.4,182.0 165.7,182.0 169.9,182.0 174.2,182.0 178.4,182.0 182.7,182.0 186.9,182.0 191.1,182.0 195.4,182.0 199.6,182.0 203.9,182.0 208.1,182.0 212.4,182.0 216.6,182.0 220.9,182.0 225.1,182.0 229.4,182.0 233.6,182.0 237.9,182.0 242.1,182.0 246.3,182.0 250.6,182.0 254.8,182.0 259.1,182.0 263.3,182.0 267.6,182.3 271.8,184.7 276.1,184.9 280.3,181.7 284.6,180.4 288.8,180.1 293.1,179.1 297.3,178.2 301.5,178.2 305.8,178.2 310.0,177.7 314.3,174.9 318.5,181.0 322.8,151.1 327.0,151.0 331.3,147.6 335.5,153.2 339.8,153.5 344.0,157.4 348.3,159.8 352.5,154.8 356.7,159.2 361.0,159.5 365.2,158.8 369.5,158.9 373.7,160.2 378.0,160.1 382.2,160.1 386.5,160.1 390.7,160.1 395.0,160.1 399.2,160.1 403.5,160.1 407.7,160.1 412.0,160.1 416.2,160.1 420.4,160.1 424.7,160.1 428.9,160.1 433.2,160.1 437.4,160.1 441.7,160.1 445.9,160.1 450.2,160.1 454.4,160.1 458.7,160.1 462.9,160.1 467.2,160.1 471.4,160.1 475.6,160.1 479.9,160.1 484.1,160.1 488.4,160.1 492.6,160.1 496.9,160.1 501.1,160.1 505.4,160.1 509.6,160.1 513.9,160.1 518.1,160.1 522.4,160.1 526.6,160.1 530.8,160.1 535.1,160.1 539.3,160.1 543.6,160.1 547.8,160.1 552.1,160.1 556.3,160.1 560.6,160.1 564.8,160.1 569.1,160.1 573.3,160.1 577.6,160.1 581.8,160.1 586.0,160.1 590.3,160.1 594.5,160.1 598.8,160.1 603.0,160.1 607.3,160.1 611.5,160.1 615.8,160.1 620.0,160.1 624.3,160.1 628.5,160.1 632.8,160.1 637.0,160.1 641.3,160.1 645.5,160.1 649.7,160.1 654.0,160.1 658.2,160.1 662.5,160.1 666.7,160.1 671.0,160.1 675.2,160.1 679.5,160.1 683.7,160.1 688.0,160.1 692.2,160.1 696.5,160.1 700.7,160.1 704.9,160.1 709.2,160.1 713.4,160.1 717.7,160.1 721.9,160.1 726.2,160.1 730.4,160.1 734.7,160.1 738.9,160.1 743.2,160.1 747.4,160.1 751.7,160.1 755.9,160.1 760.1,160.1 764.4,160.1 768.6,160.1 772.9,160.1 777.1,160.1 781.4,160.1 785.6,161.2 789.9,185.3 794.1,148.7 798.4,149.4 802.6,149.9 806.9,150.2 811.1,141.9 815.3,143.5 819.6,144.4 823.8,144.0 828.1,145.3 832.3,147.9 836.6,147.9 840.8,146.3 845.1,142.3 849.3,147.1 853.6,146.7 857.8,148.0 862.1,150.4 866.3,146.8 870.6,148.8 874.8,145.0 879.0,146.4 883.3,144.7 887.5,145.9 891.8,143.8 896.0,142.5 900.3,147.4 904.5,145.3 908.8,146.9 913.0,145.5 917.3,144.5 921.5,140.3 925.8,137.8 930.0,134.5" stroke="var(--team-vol-breakout)"/><circle class="end-dot" cx="930.0" cy="134.5" r="4.5" fill="var(--team-vol-breakout)"/><polyline class="line" points="68.0,181.6 72.2,187.9 76.5,183.9 80.7,187.2 85.0,179.6 89.2,175.7 93.5,184.6 97.7,185.3 102.0,172.8 106.2,170.1 110.5,167.1 114.7,166.5 119.0,166.3 123.2,162.0 127.4,164.8 131.7,161.3 135.9,161.3 140.2,163.0 144.4,163.4 148.7,162.9 152.9,154.7 157.2,155.9 161.4,149.6 165.7,157.2 169.9,152.2 174.2,152.2 178.4,152.5 182.7,147.3 186.9,150.3 191.1,151.2 195.4,149.1 199.6,152.4 203.9,152.1 208.1,140.1 212.4,143.1 216.6,141.1 220.9,140.5 225.1,145.3 229.4,144.6 233.6,146.0 237.9,148.9 242.1,141.8 246.3,143.7 250.6,148.0 254.8,143.9 259.1,144.9 263.3,143.2 267.6,143.3 271.8,150.2 276.1,146.7 280.3,139.7 284.6,146.8 288.8,136.2 293.1,126.7 297.3,121.8 301.5,129.5 305.8,126.4 310.0,122.5 314.3,122.5 318.5,122.5 322.8,122.2 327.0,122.5 331.3,122.1 335.5,120.9 339.8,121.5 344.0,120.2 348.3,118.1 352.5,113.0 356.7,116.5 361.0,116.9 365.2,115.8 369.5,114.4 373.7,110.7 378.0,109.3 382.2,110.2 386.5,112.7 390.7,100.4 395.0,102.3 399.2,97.8 403.5,101.8 407.7,103.5 412.0,102.9 416.2,96.8 420.4,96.8 424.7,102.3 428.9,115.8 433.2,114.0 437.4,114.6 441.7,112.4 445.9,108.0 450.2,109.9 454.4,108.0 458.7,105.1 462.9,104.5 467.2,106.5 471.4,109.0 475.6,109.0 479.9,109.0 484.1,108.8 488.4,113.4 492.6,108.5 496.9,107.0 501.1,105.9 505.4,105.7 509.6,99.7 513.9,108.1 518.1,116.6 522.4,113.6 526.6,115.5 530.8,99.1 535.1,100.0 539.3,99.7 543.6,97.6 547.8,99.6 552.1,98.5 556.3,102.9 560.6,100.9 564.8,96.8 569.1,97.7 573.3,103.7 577.6,99.4 581.8,97.0 586.0,98.6 590.3,95.1 594.5,97.2 598.8,96.8 603.0,101.9 607.3,104.8 611.5,104.8 615.8,105.7 620.0,100.5 624.3,114.7 628.5,119.0 632.8,114.0 637.0,114.0 641.3,114.0 645.5,114.0 649.7,114.1 654.0,112.7 658.2,118.4 662.5,118.5 666.7,120.2 671.0,123.8 675.2,123.9 679.5,129.3 683.7,134.7 688.0,118.4 692.2,119.0 696.5,123.6 700.7,117.4 704.9,112.8 709.2,114.2 713.4,111.2 717.7,111.6 721.9,112.2 726.2,112.5 730.4,110.8 734.7,111.2 738.9,110.1 743.2,117.8 747.4,115.8 751.7,111.0 755.9,110.6 760.1,108.6 764.4,110.0 768.6,112.9 772.9,111.7 777.1,120.5 781.4,113.0 785.6,113.0 789.9,113.0 794.1,113.0 798.4,113.3 802.6,112.9 806.9,116.2 811.1,115.1 815.3,115.9 819.6,117.6 823.8,118.8 828.1,119.5 832.3,116.3 836.6,115.5 840.8,109.1 845.1,106.2 849.3,110.3 853.6,106.1 857.8,108.5 862.1,113.1 866.3,107.0 870.6,110.8 874.8,109.8 879.0,111.4 883.3,114.3 887.5,115.5 891.8,112.4 896.0,109.5 900.3,119.7 904.5,114.0 908.8,129.4 913.0,126.7 917.3,124.6 921.5,118.4 925.8,116.5 930.0,116.5" stroke="var(--team-scalper)"/><circle class="end-dot" cx="930.0" cy="116.5" r="4.5" fill="var(--team-scalper)"/><polyline class="line" points="68.0,182.0 72.2,189.5 76.5,186.5 80.7,185.3 85.0,176.7 89.2,173.7 93.5,178.7 97.7,179.3 102.0,171.1 106.2,169.5 110.5,167.0 114.7,168.8 119.0,168.4 123.2,171.1 127.4,171.8 131.7,165.6 135.9,165.5 140.2,171.6 144.4,169.7 148.7,173.7 152.9,168.9 157.2,172.7 161.4,171.0 165.7,175.9 169.9,173.8 174.2,174.0 178.4,173.6 182.7,169.8 186.9,171.8 191.1,171.8 195.4,170.4 199.6,171.4 203.9,170.3 208.1,167.9 212.4,171.4 216.6,170.2 220.9,172.6 225.1,176.2 229.4,178.7 233.6,176.1 237.9,175.0 242.1,165.6 246.3,175.2 250.6,179.5 254.8,174.5 259.1,177.1 263.3,181.1 267.6,177.1 271.8,181.0 276.1,182.5 280.3,176.8 284.6,171.3 288.8,177.2 293.1,169.1 297.3,165.7 301.5,174.9 305.8,174.9 310.0,165.2 314.3,187.7 318.5,178.7 322.8,170.8 327.0,171.7 331.3,168.2 335.5,173.9 339.8,174.2 344.0,178.1 348.3,180.6 352.5,175.5 356.7,180.0 361.0,180.2 365.2,179.5 369.5,179.7 373.7,181.4 378.0,181.5 382.2,181.5 386.5,181.0 390.7,180.3 395.0,180.3 399.2,178.9 403.5,178.3 407.7,179.7 412.0,179.5 416.2,179.3 420.4,180.5 424.7,182.7 428.9,184.3 433.2,184.0 437.4,184.0 441.7,183.7 445.9,183.8 450.2,184.0 454.4,183.9 458.7,184.0 462.9,184.1 467.2,183.8 471.4,183.5 475.6,184.5 479.9,184.9 484.1,184.3 488.4,184.9 492.6,184.0 496.9,183.9 501.1,184.4 505.4,183.5 509.6,183.4 513.9,183.4 518.1,184.0 522.4,183.6 526.6,186.3 530.8,183.7 535.1,183.7 539.3,183.7 543.6,183.7 547.8,183.7 552.1,183.7 556.3,183.7 560.6,183.4 564.8,183.5 569.1,183.7 573.3,183.7 577.6,183.5 581.8,183.0 586.0,183.1 590.3,182.9 594.5,183.2 598.8,183.2 603.0,183.1 607.3,186.5 611.5,184.2 615.8,183.5 620.0,183.6 624.3,191.2 628.5,192.4 632.8,185.3 637.0,189.3 641.3,189.3 645.5,189.3 649.7,189.3 654.0,189.3 658.2,189.3 662.5,189.3 666.7,189.3 671.0,189.3 675.2,188.9 679.5,190.7 683.7,190.8 688.0,189.2 692.2,189.2 696.5,188.6 700.7,189.1 704.9,186.7 709.2,187.9 713.4,187.9 717.7,188.2 721.9,187.9 726.2,187.2 730.4,186.5 734.7,187.1 738.9,187.5 743.2,189.3 747.4,189.5 751.7,189.2 755.9,187.6 760.1,187.6 764.4,187.7 768.6,188.6 772.9,188.2 777.1,189.0 781.4,185.9 785.6,185.0 789.9,210.4 794.1,68.4 798.4,69.6 802.6,66.3 806.9,71.5 811.1,71.8 815.3,73.7 819.6,75.4 823.8,77.8 828.1,77.4 832.3,69.3 836.6,67.7 840.8,59.9 845.1,65.4 849.3,60.1 853.6,53.8 857.8,52.0 862.1,57.7 866.3,56.8 870.6,58.0 874.8,62.4 879.0,63.8 883.3,72.4 887.5,73.3 891.8,70.2 896.0,69.0 900.3,78.4 904.5,72.0 908.8,78.6 913.0,75.6 917.3,80.1 921.5,74.9 925.8,69.9 930.0,74.9" stroke="var(--team-gambler)"/><circle class="end-dot" cx="930.0" cy="74.9" r="4.5" fill="var(--team-gambler)"/><polyline class="line" points="68.0,182.0 72.2,182.0 76.5,182.0 80.7,182.0 85.0,182.0 89.2,182.0 93.5,182.0 97.7,182.0 102.0,182.0 106.2,182.0 110.5,182.0 114.7,182.0 119.0,182.0 123.2,184.4 127.4,184.4 131.7,182.9 135.9,183.6 140.2,185.1 144.4,185.2 148.7,177.3 152.9,178.6 157.2,176.6 161.4,169.6 165.7,170.0 169.9,171.0 174.2,171.7 178.4,172.4 182.7,165.0 186.9,165.4 191.1,166.6 195.4,166.1 199.6,168.5 203.9,170.1 208.1,159.8 212.4,160.1 216.6,160.0 220.9,155.7 225.1,159.6 229.4,150.0 233.6,157.7 237.9,163.0 242.1,162.5 246.3,161.4 250.6,164.0 254.8,162.7 259.1,163.5 263.3,160.9 267.6,162.0 271.8,164.9 276.1,163.0 280.3,160.3 284.6,164.2 288.8,158.9 293.1,154.3 297.3,151.3 301.5,156.3 305.8,157.0 310.0,150.2 314.3,160.9 318.5,153.2 322.8,181.1 327.0,183.3 331.3,182.5 335.5,180.7 339.8,179.2 344.0,179.7 348.3,177.9 352.5,177.2 356.7,178.6 361.0,179.8 365.2,180.2 369.5,178.7 373.7,176.2 378.0,172.4 382.2,173.6 386.5,178.1 390.7,168.3 395.0,170.0 399.2,169.0 403.5,172.8 407.7,171.0 412.0,170.5 416.2,167.9 420.4,161.2 424.7,161.2 428.9,171.1 433.2,169.5 437.4,169.7 441.7,167.5 445.9,168.5 450.2,169.7 454.4,168.6 458.7,169.2 462.9,169.7 467.2,164.8 471.4,163.6 475.6,170.0 479.9,165.3 484.1,178.3 488.4,182.7 492.6,176.2 496.9,175.6 501.1,177.2 505.4,174.5 509.6,174.0 513.9,174.2 518.1,179.3 522.4,178.8 526.6,179.0 530.8,174.2 535.1,175.2 539.3,175.5 543.6,175.4 547.8,175.1 552.1,173.8 556.3,173.7 560.6,171.5 564.8,171.0 569.1,172.5 573.3,173.0 577.6,171.2 581.8,171.8 586.0,171.8 590.3,171.8 594.5,171.8 598.8,171.8 603.0,171.8 607.3,171.8 611.5,171.8 615.8,171.8 620.0,171.8 624.3,171.8 628.5,171.8 632.8,171.8 637.0,171.8 641.3,171.8 645.5,171.8 649.7,171.8 654.0,171.8 658.2,171.8 662.5,171.8 666.7,171.8 671.0,171.8 675.2,171.8 679.5,171.8 683.7,171.8 688.0,171.8 692.2,171.8 696.5,171.8 700.7,174.8 704.9,170.9 709.2,172.9 713.4,173.6 717.7,173.8 721.9,173.0 726.2,171.5 730.4,165.8 734.7,165.4 738.9,162.3 743.2,168.4 747.4,166.6 751.7,164.1 755.9,162.5 760.1,161.9 764.4,163.3 768.6,164.5 772.9,164.3 777.1,165.1 781.4,162.3 785.6,177.7 789.9,181.2 794.1,42.8 798.4,45.8 802.6,43.3 806.9,47.0 811.1,47.7 815.3,49.4 819.6,50.5 823.8,52.1 828.1,52.3 832.3,46.0 836.6,44.5 840.8,39.1 845.1,43.1 849.3,40.7 853.6,35.6 857.8,35.4 862.1,38.5 866.3,36.7 870.6,37.9 874.8,38.8 879.0,39.6 883.3,46.1 887.5,46.5 891.8,44.6 896.0,43.0 900.3,50.3 904.5,45.2 908.8,49.7 913.0,47.9 917.3,51.3 921.5,48.4 925.8,45.4 930.0,49.4" stroke="var(--team-q-learner)"/><circle class="end-dot" cx="930.0" cy="49.4" r="4.5" fill="var(--team-q-learner)"/><polyline class="line" points="68.0,182.0 72.2,187.8 76.5,184.3 80.7,188.5 85.0,188.2 89.2,189.4 93.5,194.3 97.7,195.4 102.0,188.2 106.2,187.9 110.5,184.6 114.7,184.1 119.0,183.3 123.2,178.7 127.4,180.3 131.7,180.8 135.9,184.7 140.2,185.2 144.4,182.7 148.7,174.2 152.9,175.4 157.2,173.5 161.4,166.9 165.7,167.3 169.9,168.3 174.2,168.8 178.4,169.6 182.7,162.7 186.9,163.0 191.1,164.2 195.4,163.7 199.6,165.9 203.9,167.5 208.1,157.8 212.4,158.1 216.6,157.9 220.9,153.9 225.1,157.6 229.4,148.6 233.6,155.9 237.9,160.8 242.1,160.3 246.3,159.3 250.6,161.8 254.8,161.0 259.1,158.4 263.3,153.4 267.6,157.4 271.8,160.1 276.1,154.8 280.3,153.9 284.6,167.4 288.8,149.5 293.1,149.1 297.3,146.6 301.5,145.8 305.8,147.3 310.0,144.7 314.3,163.3 318.5,142.0 322.8,167.3 327.0,169.1 331.3,162.6 335.5,167.2 339.8,160.1 344.0,173.2 348.3,174.1 352.5,167.7 356.7,176.6 361.0,177.2 365.2,171.2 369.5,174.1 373.7,178.2 378.0,181.4 382.2,181.2 386.5,181.2 390.7,181.2 395.0,181.2 399.2,172.0 403.5,177.4 407.7,171.5 412.0,174.8 416.2,173.2 420.4,171.9 424.7,175.9 428.9,186.3 433.2,184.2 437.4,184.4 441.7,181.5 445.9,184.0 450.2,185.6 454.4,184.3 458.7,181.2 462.9,181.9 467.2,180.9 471.4,178.7 475.6,185.9 479.9,176.6 484.1,205.4 488.4,211.1 492.6,205.8 496.9,204.5 501.1,199.1 505.4,199.5 509.6,199.5 513.9,199.5 518.1,199.5 522.4,199.5 526.6,199.5 530.8,199.5 535.1,199.5 539.3,199.5 543.6,199.5 547.8,199.5 552.1,199.5 556.3,199.5 560.6,199.5 564.8,199.5 569.1,199.5 573.3,199.5 577.6,199.5 581.8,199.5 586.0,201.1 590.3,199.2 594.5,202.1 598.8,202.2 603.0,200.7 607.3,213.0 611.5,204.9 615.8,203.9 620.0,204.1 624.3,203.6 628.5,203.6 632.8,203.6 637.0,202.6 641.3,198.2 645.5,188.3 649.7,187.3 654.0,182.6 658.2,192.6 662.5,193.8 666.7,193.7 671.0,203.0 675.2,203.0 679.5,203.0 683.7,203.0 688.0,203.0 692.2,203.1 696.5,208.4 700.7,206.1 704.9,197.4 709.2,200.9 713.4,198.5 717.7,199.7 721.9,198.5 726.2,198.8 730.4,193.1 734.7,194.1 738.9,192.4 743.2,206.0 747.4,203.4 751.7,198.1 755.9,195.9 760.1,193.3 764.4,196.0 768.6,199.8 772.9,199.1 777.1,202.8 781.4,203.9 785.6,212.0 789.9,253.3 794.1,59.2 798.4,58.5 802.6,58.7 806.9,59.1 811.1,57.2 815.3,55.7 819.6,56.4 823.8,56.8 828.1,54.9 832.3,56.6 836.6,57.7 840.8,57.0 845.1,56.5 849.3,57.1 853.6,55.2 857.8,57.7 862.1,57.2 866.3,54.1 870.6,55.9 874.8,54.1 879.0,55.4 883.3,53.7 887.5,54.9 891.8,53.5 896.0,57.2 900.3,53.5 904.5,55.9 908.8,57.2 913.0,55.9 917.3,54.9 921.5,50.8 925.8,48.4 930.0,45.2" stroke="var(--team-news-hound)"/><circle class="end-dot" cx="930.0" cy="45.2" r="4.5" fill="var(--team-news-hound)"/><rect class="label-swatch" x="938.0" y="43.7" width="7" height="7" rx="2" fill="var(--team-news-hound)"/><text class="series-label" x="950.0" y="49.2">News Hound</text><rect class="label-swatch" x="938.0" y="60.9" width="7" height="7" rx="2" fill="var(--team-q-learner)"/><text class="series-label" x="950.0" y="66.4">Q-Learner</text><rect class="label-swatch" x="938.0" y="86.4" width="7" height="7" rx="2" fill="var(--team-gambler)"/><text class="series-label" x="950.0" y="91.9">The Gambler</text><rect class="label-swatch" x="938.0" y="101.1" width="7" height="7" rx="2" fill="var(--team-benchmark)"/><text class="series-label" x="950.0" y="106.6">Buy &amp; Hold (benchmark)</text><text class="ref-label" x="938.0" y="186.0">start $5,000</text><rect class="label-swatch" x="938.0" y="242.3" width="7" height="7" rx="2" fill="var(--team-stat-arb)"/><text class="series-label" x="950.0" y="247.8">Stat Arb</text><line id="crosshair" class="crosshair" x1="0" y1="18" x2="0" y2="342" style="display:none"/><rect id="hover-target" x="68" y="18" width="862" height="324" fill="transparent"/></svg><div id="tooltip" class="tooltip" hidden></div><script id="chart-data" type="application/json">{"n": 204, "padL": 68, "padR": 150, "w": 1080, "stamps": ["2026-09-21T14:58:22.133761+00:00", "2026-09-21T15:03:27.230112+00:00", "2026-09-21T15:08:29.114877+00:00", "2026-09-21T15:13:30.499080+00:00", "2026-09-21T15:18:39.747057+00:00", "2026-09-21T15:23:42.017408+00:00", "2026-09-21T15:28:43.878005+00:00", "2026-09-21T15:33:47.925510+00:00", "2026-09-21T15:38:51.252402+00:00", "2026-09-21T15:43:56.304960+00:00", "2026-09-21T15:48:59.483741+00:00", "2026-09-21T15:54:03.590630+00:00", "2026-09-21T15:59:05.066494+00:00", "2026-09-21T16:04:11.752205+00:00", "2026-09-21T16:09:14.640234+00:00", "2026-09-21T16:14:18.377367+00:00", "2026-09-21T16:19:22.231192+00:00", "2026-09-21T16:24:26.565618+00:00", "2026-09-21T16:29:29.928282+00:00", "2026-09-21T16:34:36.829827+00:00", "2026-09-21T16:39:38.580871+00:00", "2026-09-21T16:44:41.582900+00:00", "2026-09-21T16:49:43.727574+00:00", "2026-09-21T16:54:47.132252+00:00", "2026-09-21T16:59:50.489213+00:00", "2026-09-21T17:04:56.435082+00:00", "2026-09-21T17:10:01.402045+00:00", "2026-09-21T17:15:05.382394+00:00", "2026-09-21T17:20:10.461957+00:00", "2026-09-21T17:25:13.368705+00:00", "2026-09-21T17:30:14.349056+00:00", "2026-09-21T17:35:22.141729+00:00", "2026-09-21T17:40:24.898002+00:00", "2026-09-21T17:45:28.132094+00:00", "2026-09-21T17:50:32.083146+00:00", "2026-09-21T17:55:35.899976+00:00", "2026-09-21T18:00:40.715133+00:00", "2026-09-21T18:05:47.297256+00:00", "2026-09-21T18:10:53.048941+00:00", "2026-09-21T18:15:57.475671+00:00", "2026-09-21T18:21:00.855425+00:00", "2026-09-21T18:26:04.476696+00:00", "2026-09-21T18:31:09.019564+00:00", "2026-09-21T18:36:12.143522+00:00", "2026-09-21T18:41:14.965692+00:00", "2026-09-21T18:46:17.430578+00:00", "2026-09-21T18:51:21.075540+00:00", "2026-09-21T18:56:24.046480+00:00", "2026-09-21T19:01:28.904192+00:00", "2026-09-21T19:06:33.728453+00:00", "2026-09-21T19:11:36.117022+00:00", "2026-09-21T19:16:43.883049+00:00", "2026-09-21T19:21:47.290260+00:00", "2026-09-21T19:26:50.495998+00:00", "2026-09-21T19:31:55.800151+00:00", "2026-09-21T19:37:01.508819+00:00", "2026-09-21T19:42:05.538724+00:00", "2026-09-21T19:47:12.291097+00:00", "2026-09-21T19:52:15.493235+00:00", "2026-09-21T19:57:16.864847+00:00", "2026-09-22T16:51:10.865433+00:00", "2026-09-22T16:56:21.630878+00:00", "2026-09-22T17:01:27.289330+00:00", "2026-09-22T17:06:32.418209+00:00", "2026-09-22T17:11:35.656591+00:00", "2026-09-22T17:16:42.561755+00:00", "2026-09-22T17:21:47.969131+00:00", "2026-09-22T17:26:53.780916+00:00", "2026-09-22T17:32:02.128140+00:00", "2026-09-22T17:37:08.451006+00:00", "2026-09-22T17:42:11.743345+00:00", "2026-09-22T17:47:17.873073+00:00", "2026-09-22T17:52:23.956677+00:00", "2026-09-22T17:57:32.143535+00:00", "2026-09-22T18:02:34.386150+00:00", "2026-09-22T18:07:36.627653+00:00", "2026-09-22T18:12:40.168407+00:00", "2026-09-22T18:17:45.417246+00:00", "2026-09-22T18:22:47.689035+00:00", "2026-09-22T18:27:51.233054+00:00", "2026-09-22T18:32:59.140559+00:00", "2026-09-22T18:38:03.799700+00:00", "2026-09-22T18:43:07.850061+00:00", "2026-09-22T18:48:15.479541+00:00", "2026-09-22T18:53:22.486521+00:00", "2026-09-22T18:58:28.275655+00:00", "2026-09-22T19:03:34.505597+00:00", "2026-09-22T19:08:40.398626+00:00", "2026-09-22T19:13:47.794233+00:00", "2026-09-22T19:18:55.340048+00:00", "2026-09-22T19:24:05.116766+00:00", "2026-09-22T19:29:09.900595+00:00", "2026-09-22T19:34:11.507201+00:00", "2026-09-22T19:39:21.731333+00:00", "2026-09-22T19:44:28.504828+00:00", "2026-09-22T19:49:36.238174+00:00", "2026-09-22T19:54:45.550182+00:00", "2026-09-22T19:59:52.884089+00:00", "2026-09-23T16:49:39.791114+00:00", "2026-09-23T16:54:41.025758+00:00", "2026-09-23T16:59:41.787221+00:00", "2026-09-23T17:04:52.002428+00:00", "2026-09-23T17:10:05.195130+00:00", "2026-09-23T17:15:20.528812+00:00", "2026-09-23T17:20:24.715546+00:00", "2026-09-23T17:25:25.284579+00:00", "2026-09-23T17:30:25.486316+00:00", "2026-09-23T17:35:26.985643+00:00", "2026-09-23T17:40:28.215168+00:00", "2026-09-23T17:45:48.643161+00:00", "2026-09-23T17:51:02.392716+00:00", "2026-09-23T17:56:07.553298+00:00", "2026-09-23T18:01:08.066069+00:00", "2026-09-23T18:06:11.446047+00:00", "2026-09-23T18:11:15.459708+00:00", "2026-09-23T18:16:31.679337+00:00", "2026-09-23T18:21:44.637353+00:00", "2026-09-23T18:27:01.129939+00:00", "2026-09-23T18:32:02.872579+00:00", "2026-09-23T18:37:06.359807+00:00", "2026-09-23T18:42:11.327477+00:00", "2026-09-23T18:47:13.215300+00:00", "2026-09-23T18:52:32.027209+00:00", "2026-09-23T18:57:53.157437+00:00", "2026-09-23T19:02:58.756026+00:00", "2026-09-23T19:08:02.058104+00:00", "2026-09-23T19:13:21.527130+00:00", "2026-09-23T19:18:42.676216+00:00", "2026-09-23T19:23:45.987999+00:00", "2026-09-23T19:28:56.277841+00:00", "2026-09-23T19:34:03.698124+00:00", "2026-09-23T19:39:17.066856+00:00", "2026-09-23T19:44:33.398052+00:00", "2026-09-23T19:49:39.259965+00:00", "2026-09-23T19:54:56.930001+00:00", "2026-09-23T20:00:11.492094+00:00", "2026-09-24T17:04:19.337085+00:00", "2026-09-24T17:09:23.924330+00:00", "2026-09-24T17:14:42.213406+00:00", "2026-09-24T17:19:43.135731+00:00", "2026-09-24T17:24:50.862012+00:00", "2026-09-24T17:29:59.449014+00:00", "2026-09-24T17:35:10.687445+00:00", "2026-09-24T17:40:12.320278+00:00", "2026-09-24T17:45:23.198100+00:00", "2026-09-24T17:50:29.337210+00:00", "2026-09-24T17:55:30.965825+00:00", "2026-09-24T18:00:34.498509+00:00", "2026-09-24T18:05:47.657078+00:00", "2026-09-24T18:11:04.500621+00:00", "2026-09-24T18:16:14.452901+00:00", "2026-09-24T18:21:25.870411+00:00", "2026-09-24T18:26:33.172895+00:00", "2026-09-24T18:31:47.604516+00:00", "2026-09-24T18:37:01.898499+00:00", "2026-09-24T18:42:21.357929+00:00", "2026-09-24T18:47:36.658865+00:00", "2026-09-24T18:52:52.274351+00:00", "2026-09-24T18:58:04.451482+00:00", "2026-09-24T19:03:22.716286+00:00", "2026-09-24T19:08:35.024532+00:00", "2026-09-24T19:13:45.323551+00:00", "2026-09-24T19:18:59.486096+00:00", "2026-09-24T19:24:08.104306+00:00", "2026-09-24T19:29:10.548520+00:00", "2026-09-24T19:34:24.672084+00:00", "2026-09-24T19:39:34.640914+00:00", "2026-09-24T19:44:38.675993+00:00", "2026-09-24T19:49:39.804304+00:00", "2026-09-24T19:54:52.669828+00:00", "2026-09-24T20:00:07.231877+00:00", "2026-09-25T17:04:51.919553+00:00", "2026-09-25T17:10:06.852710+00:00", "2026-09-25T17:15:10.922123+00:00", "2026-09-25T17:20:20.221939+00:00", "2026-09-25T17:25:28.430024+00:00", "2026-09-25T17:30:31.923256+00:00", "2026-09-25T17:35:44.234647+00:00", "2026-09-25T17:40:52.816542+00:00", "2026-09-25T17:45:58.203159+00:00", "2026-09-25T17:51:09.479437+00:00", "2026-09-25T17:56:18.693385+00:00", "2026-09-25T18:01:32.965128+00:00", "2026-09-25T18:06:48.587174+00:00", "2026-09-25T18:11:56.300116+00:00", "2026-09-25T18:17:10.343592+00:00", "2026-09-25T18:22:21.167605+00:00", "2026-09-25T18:27:25.150705+00:00", "2026-09-25T18:32:26.823931+00:00", "2026-09-25T18:37:38.872170+00:00", "2026-09-25T18:42:50.703261+00:00", "2026-09-25T18:48:04.414032+00:00", "2026-09-25T18:53:19.489935+00:00", "2026-09-25T18:58:31.023334+00:00", "2026-09-25T19:03:45.662513+00:00", "2026-09-25T19:08:58.693321+00:00", "2026-09-25T19:14:12.883712+00:00", "2026-09-25T19:19:28.436279+00:00", "2026-09-25T19:24:41.534866+00:00", "2026-09-25T19:29:51.976334+00:00", "2026-09-25T19:35:06.712614+00:00", "2026-09-25T19:40:18.203678+00:00", "2026-09-25T19:45:29.422380+00:00", "2026-09-25T19:50:05.302138+00:00"], "series": [{"key": "mean_reverter", "name": "Mean Reverter", "curve": [5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 4999.732374, 5000.71367, 5000.654197, 5002.230218, 5001.040768, 5003.092568, 5011.151089, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628, 5010.526628], "baseline": 5000.0, "scored": true}, {"key": "news_hound", "name": "News Hound", "curve": [5000.0, 4996.955061, 4998.806163, 4996.621256, 4996.727467, 4996.120548, 4993.556316, 4992.979743, 4996.757812, 4996.894369, 4998.639261, 4998.897201, 4999.322044, 5001.74972, 5000.930379, 5000.657266, 4998.624088, 4998.350974, 4999.640677, 5004.116703, 5003.494611, 5004.496027, 5007.955464, 5007.743043, 5007.257508, 5006.969221, 5006.574724, 5010.216237, 5010.018988, 5009.412069, 5009.67001, 5008.501691, 5007.667178, 5012.780469, 5012.628739, 5012.704604, 5014.82882, 5012.856334, 5017.635819, 5013.797058, 5011.187307, 5011.46042, 5011.976301, 5010.686599, 5011.111442, 5012.446663, 5015.071587, 5012.977717, 5011.566631, 5014.343285, 5014.813647, 5007.712697, 5017.165457, 5017.33236, 5018.652408, 5019.12277, 5018.318603, 5019.668997, 5009.867259, 5021.095256, 5007.758216, 5006.818915, 5010.246731, 5007.796955, 5011.549961, 5004.664807, 5004.167885, 5007.548831, 5002.881029, 5002.552507, 5005.724743, 5004.195795, 5002.022127, 5000.311631, 5000.453124, 5000.453124, 5000.453124, 5000.453124, 5005.303679, 5002.46097, 5005.559252, 5003.812886, 5004.654861, 5005.33428, 5003.23118, 4997.772897, 4998.864783, 4998.774771, 5000.26472, 4998.94901, 4998.100046, 4998.786037, 5000.455175, 5000.072839, 5000.583779, 5001.742187, 4997.954106, 5002.855093, 4987.677961, 4984.679737, 4987.464497, 4988.143923, 4991.001011, 4990.802549, 4990.802549, 4990.802549, 4990.802549, 4990.802549, 4990.802549, 4990.802549, 4990.802549, 4990.802549, 4990.802549, 4990.802549, 4990.802549, 4990.802549, 4990.802549, 4990.802549, 4990.802549, 4990.802549, 4990.802549, 4990.802549, 4989.980645, 4990.981873, 4989.427728, 4989.382897, 4990.189857, 4983.659458, 4987.978189, 4988.486274, 4988.351781, 4988.650655, 4988.650655, 4988.650655, 4989.184818, 4991.499522, 4996.726971, 4997.224449, 4999.699236, 4994.411439, 4993.821852, 4993.856345, 4988.945695, 4988.945695, 4988.945695, 4988.945695, 4988.945695, 4988.915536, 4986.107807, 4987.326912, 4991.929504, 4990.036337, 4991.348744, 4990.695472, 4991.32407, 4991.189544, 4994.192111, 4993.633564, 4994.528562, 4987.351488, 4988.744178, 4991.531417, 4992.696061, 4994.06981, 4992.669256, 4990.649791, 4990.994298, 4989.083795, 4988.48253, 4984.192896, 4962.443029, 5064.723082, 5065.094361, 5065.005617, 5064.783758, 5065.804311, 5066.558633, 5066.225844, 5066.003985, 5067.002352, 5066.114914, 5065.53808, 5065.893055, 5066.159286, 5065.826497, 5066.84705, 5065.515894, 5065.782125, 5067.401699, 5066.447703, 5067.423885, 5066.736121, 5067.623558, 5067.002352, 5067.756674, 5065.804311, 5067.712302, 5066.492075, 5065.782125, 5066.492075, 5067.002352, 5069.154388, 5070.418987, 5072.105118], "baseline": 5000.0, "scored": true}, {"key": "q_learner", "name": "Q-Learner", "curve": [5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 4998.750469, 4998.771478, 4999.559315, 4999.160145, 4998.382812, 4998.351299, 5002.485061, 5001.821945, 5002.8894, 5006.576971, 5006.350542, 5005.832988, 5005.444822, 5005.105178, 5008.986832, 5008.776576, 5008.129633, 5008.404584, 5007.15922, 5006.269674, 5011.720164, 5011.558428, 5011.639296, 5013.903594, 5011.801031, 5016.895703, 5012.803792, 5010.02194, 5010.313064, 5010.862965, 5009.488212, 5010.217703, 5009.792357, 5011.130348, 5010.564494, 5009.047587, 5010.027282, 5011.435791, 5009.415141, 5012.204069, 5014.636009, 5016.189226, 5013.580154, 5013.179974, 5016.772208, 5011.164478, 5015.175401, 5000.486643, 4999.361071, 4999.762352, 5000.699306, 5001.510714, 5001.222761, 5002.198861, 5002.534019, 5001.809603, 5001.191507, 5000.945348, 5001.741062, 5003.091535, 5005.056196, 5004.43661, 5002.099457, 5007.254221, 5006.325501, 5006.891306, 5004.864479, 5005.835696, 5006.083005, 5007.443083, 5010.961947, 5010.99409, 5005.754843, 5006.622693, 5006.526266, 5007.651257, 5007.136975, 5006.510194, 5007.056619, 5006.767335, 5006.510194, 5009.065533, 5009.692314, 5006.337454, 5008.839413, 5001.952457, 4999.648258, 5003.05837, 5003.367766, 5002.571122, 5003.976523, 5004.224535, 5004.126833, 5001.451311, 5001.691808, 5001.616653, 5004.119317, 5003.582337, 5003.444661, 5003.495782, 5003.652951, 5004.335709, 5004.372959, 5005.55826, 5005.812413, 5005.011961, 5004.787834, 5005.732368, 5005.369955, 5005.369955, 5005.369955, 5005.369955, 5005.369955, 5005.369955, 5005.369955, 5005.369955, 5005.369955, 5005.369955, 5005.369955, 5005.369955, 5005.369955, 5005.369955, 5005.369955, 5005.369955, 5005.369955, 5005.369955, 5005.369955, 5005.369955, 5005.369955, 5005.369955, 5005.369955, 5005.369955, 5005.369955, 5005.369955, 5005.369955, 5005.369955, 5003.83869, 5005.889996, 5004.836919, 5004.452985, 5004.34329, 5004.782072, 5005.536022, 5008.536362, 5008.778325, 5010.423673, 5007.213632, 5008.149222, 5009.455821, 5010.278495, 5010.633374, 5009.859093, 5009.24612, 5009.359036, 5008.939634, 5010.407542, 5002.277589, 5000.454801, 5073.39855, 5071.817726, 5073.124325, 5071.15636, 5070.801481, 5069.914284, 5069.317442, 5068.462507, 5068.381852, 5071.70481, 5072.46296, 5075.350384, 5073.22111, 5074.457556, 5077.169062, 5077.296677, 5075.651499, 5076.574567, 5075.938663, 5075.495659, 5075.03751, 5071.654468, 5071.419535, 5072.421918, 5073.28334, 5069.414769, 5072.093011, 5069.712352, 5070.68341, 5068.897916, 5070.40149, 5071.983375, 5069.900299], "baseline": 5000.0, "scored": true}, {"key": "stat_arb", "name": "Stat Arb", "curve": [5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 4999.328416, 4998.552362, 4999.597049, 4998.015095, 5001.059611, 5001.925209, 5001.790892, 5002.462476, 5001.761044, 4999.432884, 5001.567031, 5004.536926, 5006.850162, 5006.283046, 5002.32816, 5005.775627, 5005.775627, 5005.029422, 5004.641395, 5002.65649, 5004.432458, 5005.924868, 5006.253198, 5006.193501, 5002.462476, 5002.686338, 5002.477401, 5002.880351, 5004.80556, 5004.417534, 5005.089118, 5006.029336, 5006.04426, 5003.89519, 5003.387771, 5002.805731, 4999.791063, 4962.048014, 4959.12289, 4960.152653, 4960.451135, 4961.257036, 4960.107881, 4960.466059, 4960.28697, 4960.94363, 4960.510831, 4959.973564, 4962.853915, 4963.092701, 4962.644978, 4962.480813, 4963.435955, 4964.241856, 4964.808972, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4964.719428, 4963.537147, 4963.324943, 4969.175718, 4968.054066, 4967.387139, 4967.659973, 4966.780841, 4964.931632, 4964.901317, 4966.053283, 4968.872569, 4965.4773, 4965.750134, 4964.871002, 4963.173368, 4965.689505, 4964.325334, 4965.628875, 4965.628875, 4965.59856, 4965.628875, 4966.477692, 4969.630441, 4963.597777, 4966.720211, 4965.962339, 4958.717079, 4961.778883, 4967.963122, 4968.478475, 4967.478083], "baseline": 5000.0, "scored": true}, {"key": "gambler", "name": "The Gambler", "curve": [5000.0, 4996.050867, 4997.649567, 4998.306085, 5002.829462, 5004.399028, 5001.780896, 5001.45291, 5005.75553, 5006.614448, 5007.935626, 5006.99032, 5007.195147, 5005.762282, 5005.402886, 5008.688406, 5008.694463, 5005.477913, 5006.482467, 5004.382213, 5006.907957, 5004.939947, 5005.82025, 5003.242162, 5004.328382, 5004.235148, 5004.443003, 5006.439601, 5005.403938, 5005.383494, 5006.129822, 5005.604797, 5006.197797, 5007.436801, 5005.596954, 5006.219333, 5004.979239, 5003.063724, 5001.742846, 5003.105103, 5003.732843, 5008.637152, 5003.616737, 5001.34128, 5003.977374, 5002.611845, 5000.510595, 5002.619632, 5000.547911, 4999.776077, 5002.739067, 5005.677492, 5002.528334, 5006.796515, 5008.585899, 5003.75925, 5003.772002, 5008.869872, 4997.004621, 5001.774719, 5005.897844, 5005.461821, 5007.2891, 5004.282185, 5004.143404, 5002.061694, 5000.766408, 5003.426371, 5001.090229, 5000.951448, 5001.32153, 5001.22901, 5000.330067, 5000.270861, 5000.270861, 5000.52742, 5000.912258, 5000.892523, 5001.6622, 5001.948362, 5001.218156, 5001.336567, 5001.445112, 5000.836566, 4999.657513, 4998.829356, 4998.968649, 4998.953453, 4999.130735, 4999.049692, 4998.950921, 4999.037029, 4998.991442, 4998.916269, 4999.073497, 4999.247348, 4998.686057, 4998.469399, 4998.793571, 4998.492192, 4998.986048, 4999.001243, 4998.732789, 4999.206383, 4999.289958, 4999.257035, 4998.969332, 4999.162184, 4997.776064, 4999.138078, 4999.138078, 4999.138078, 4999.138078, 4999.138078, 4999.138078, 4999.138078, 4999.267548, 4999.221186, 4999.13533, 4999.11129, 4999.212601, 4999.513097, 4999.423806, 4999.550873, 4999.372293, 4999.401484, 4999.459866, 4997.64571, 4998.86388, 4999.21534, 4999.201822, 4995.173558, 4994.538228, 4998.296138, 4996.173865, 4996.173865, 4996.173865, 4996.173865, 4996.173865, 4996.173865, 4996.173865, 4996.173865, 4996.173865, 4996.388561, 4995.410961, 4995.359911, 4996.241413, 4996.213852, 4996.522471, 4996.264743, 4997.535208, 4996.889888, 4996.893423, 4996.753052, 4996.924986, 4997.276066, 4997.623818, 4997.342043, 4997.118336, 4996.20017, 4996.080866, 4996.240554, 4997.079932, 4997.074505, 4997.032913, 4996.565651, 4996.731636, 4996.344984, 4997.959312, 4998.423201, 4985.058629, 5059.897155, 5059.267921, 5061.014588, 5058.246814, 5058.074371, 5057.083237, 5056.16985, 5054.936285, 5055.11909, 5059.400122, 5060.266982, 5064.356507, 5061.485485, 5064.253807, 5067.595726, 5068.52778, 5065.499925, 5066.016877, 5065.36208, 5063.047157, 5062.294134, 5057.79264, 5057.279614, 5058.911973, 5059.551463, 5054.621995, 5057.98964, 5054.531451, 5056.09367, 5053.730182, 5056.47827, 5059.076111, 5056.442434], "baseline": 5000.0, "scored": true}, {"key": "scalper", "name": "The Scalper", "curve": [5000.220195, 4996.90738, 4999.024887, 4997.292597, 5001.272973, 5003.320046, 4998.643541, 4998.26457, 5004.86234, 5006.303522, 5007.847529, 5008.213326, 5008.27813, 5010.573597, 5009.070287, 5010.939191, 5010.951842, 5010.020525, 5009.813333, 5010.091928, 5014.382286, 5013.749391, 5017.097198, 5013.069559, 5015.736086, 5015.724944, 5015.586058, 5018.32849, 5016.741343, 5016.260892, 5017.340036, 5015.6332, 5015.800116, 5022.112605, 5020.499819, 5021.549815, 5021.902633, 5019.375707, 5019.736201, 5019.003924, 5017.479931, 5021.212935, 5020.186581, 5017.955756, 5020.090594, 5019.576425, 5020.455709, 5020.408706, 5016.795409, 5018.648604, 5022.316495, 5018.589369, 5024.15181, 5029.168238, 5031.744034, 5027.699963, 5029.327117, 5031.374115, 5031.374115, 5031.374115, 5031.547709, 5031.393935, 5031.595515, 5032.20396, 5031.89125, 5032.584716, 5033.677411, 5036.393292, 5034.542514, 5034.336259, 5034.879897, 5035.62198, 5037.581845, 5038.310987, 5037.880249, 5036.56096, 5043.007859, 5042.000804, 5044.41712, 5042.271629, 5041.381289, 5041.700765, 5044.90189, 5044.902339, 5042.044256, 5034.928787, 5035.879172, 5035.515088, 5036.679885, 5038.990248, 5038.000735, 5039.025445, 5040.544501, 5040.84785, 5039.823576, 5038.46837, 5038.46837, 5038.46837, 5038.569783, 5036.1597, 5038.736901, 5039.55479, 5040.141994, 5040.236354, 5043.415637, 5038.9827, 5034.482989, 5036.072983, 5035.058396, 5043.682134, 5043.250896, 5043.383356, 5044.497492, 5043.449689, 5044.03123, 5041.709457, 5042.751453, 5044.897983, 5044.443627, 5041.295079, 5043.546981, 5044.812476, 5043.955599, 5045.832212, 5044.708225, 5044.94036, 5042.241682, 5040.715601, 5040.688338, 5040.212964, 5042.971546, 5035.467507, 5033.233951, 5035.864353, 5035.864353, 5035.864353, 5035.864353, 5035.809685, 5036.560192, 5033.539169, 5033.491165, 5032.564666, 5030.702754, 5030.657162, 5027.788511, 5024.970118, 5033.513745, 5033.242833, 5030.805949, 5034.063614, 5036.477535, 5035.723126, 5037.34614, 5037.121687, 5036.802052, 5036.633267, 5037.548521, 5037.345607, 5037.895343, 5033.855492, 5034.918543, 5037.441818, 5037.655575, 5038.718978, 5037.949846, 5036.433089, 5037.085247, 5032.44439, 5036.369285, 5036.369285, 5036.369285, 5036.369285, 5036.225875, 5036.444404, 5034.699917, 5035.265559, 5034.878269, 5033.968051, 5033.315214, 5032.972256, 5034.63715, 5035.088011, 5038.438188, 5039.981375, 5037.810064, 5040.031043, 5038.744477, 5036.353176, 5039.518274, 5037.561515, 5038.054136, 5037.249506, 5035.705897, 5035.04831, 5036.706363, 5038.239806, 5032.833108, 5035.834654, 5027.718944, 5029.186045, 5030.294173, 5033.55449, 5034.539012, 5034.539012], "baseline": 5000.0, "scored": true}, {"key": "trend_rider", "name": "Trend Rider", "curve": [5000.0, 4997.07857, 4996.98868, 4997.730273, 5003.760063, 5005.553077, 5001.748285, 5001.386246, 5007.343277, 5008.743675, 5011.451599, 5009.231059, 5008.312366, 5006.703215, 5005.717592, 5012.662484, 5013.9052, 5006.947244, 5009.75831, 5005.540883, 5011.089893, 5009.916543, 5011.662577, 5007.607938, 5007.801816, 5007.658298, 5007.060127, 5013.860778, 5011.533036, 5010.437853, 5011.783255, 5009.952365, 5008.787847, 5014.484104, 5011.435108, 5012.557976, 5011.949818, 5007.890173, 5013.070967, 5008.48597, 5005.368898, 5005.695103, 5006.311269, 5004.770855, 5005.278285, 5006.873067, 5010.008262, 5007.507355, 5005.821961, 5009.138381, 5009.700179, 5001.218842, 5011.375573, 5011.375573, 5011.375573, 5011.375573, 5011.375573, 5011.422844, 5012.959169, 5010.210609, 5005.329846, 5005.640737, 5005.475287, 5005.475287, 5005.475287, 5005.475287, 5005.475287, 5005.475287, 5005.475287, 5004.37886, 5007.377909, 5005.846137, 5004.233745, 5004.927073, 5004.620719, 5005.459163, 5011.247648, 5009.264407, 5011.602374, 5007.861626, 5012.940659, 5010.780055, 5011.769448, 5016.789333, 5016.837601, 5008.945762, 5010.273136, 5010.128331, 5011.817716, 5011.045426, 5010.104197, 5010.924755, 5010.490342, 5010.104197, 5013.941513, 5014.882742, 5010.442074, 5010.997158, 5010.104197, 5010.104197, 5010.104197, 5010.104197, 5010.104197, 5010.104197, 5010.104197, 5010.104197, 5010.104197, 5010.104197, 5010.104197, 5010.092704, 5008.729959, 5009.451412, 5009.820155, 5008.361216, 5008.826153, 5008.008505, 5011.150836, 5010.717964, 5009.916349, 5009.691897, 5010.637802, 5016.471148, 5015.41422, 5017.023633, 5014.693588, 5014.933799, 5015.750515, 5005.253304, 5012.195396, 5012.843965, 5012.795923, 5005.637641, 5004.50865, 5011.18651, 5004.364524, 5016.51919, 4992.52169, 4991.719107, 4994.812822, 4987.98915, 4987.859867, 4987.039546, 4983.208702, 4984.328225, 4982.975468, 4982.555646, 4984.957957, 4985.331131, 4986.590595, 4988.573085, 4989.575991, 4987.336944, 4986.520625, 4986.287391, 4987.220327, 4988.549761, 4989.692608, 4988.355725, 4988.698982, 4983.394092, 4983.821875, 4984.808101, 4987.656536, 4988.475029, 4987.586684, 4984.457899, 4985.487492, 4983.609459, 4984.628064, 4985.864204, 4972.569863, 4992.394758, 4992.021584, 4991.765026, 4989.502613, 4992.434998, 4992.035367, 4990.301356, 4989.825743, 4989.403289, 4989.301415, 4990.532945, 4993.573703, 4991.685756, 4993.456506, 4996.691791, 4996.306304, 4994.219099, 4995.3398, 4994.486535, 4993.344508, 4992.501791, 4989.757324, 4989.113167, 4990.602056, 4990.154131, 4987.769078, 4987.045508, 4986.603401, 4987.045508, 4987.384456, 4988.778807, 4989.995312, 4992.296092], "baseline": 5000.0, "scored": true}, {"key": "vol_breakout", "name": "Vol Breakout", "curve": [5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 4999.839852, 4998.604428, 4998.467159, 5000.183026, 5000.846494, 5001.02952, 5001.532841, 5002.036162, 5002.013284, 5002.036162, 5002.287823, 5003.774907, 5000.571956, 5016.289296, 5016.357931, 5018.16531, 5015.191141, 5015.053872, 5012.994832, 5011.713651, 5014.344647, 5012.033946, 5011.896677, 5012.262728, 5012.171215, 5011.484869, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5011.576382, 5010.964112, 4998.287845, 5017.563027, 5017.2002, 5016.950757, 5016.79202, 5021.16862, 5020.329583, 5019.830696, 5020.034786, 5019.377162, 5017.993884, 5017.971207, 5018.832921, 5020.941853, 5018.402064, 5018.606155, 5017.948531, 5016.678636, 5018.560801, 5017.54035, 5019.498659, 5018.789832, 5019.681771, 5019.064217, 5020.156472, 5020.822809, 5018.276571, 5019.354674, 5018.532275, 5019.263967, 5019.789871, 5022.007812, 5023.311139, 5025.048907], "baseline": 5000.0, "scored": true}, {"key": "benchmark", "name": "Buy & Hold (benchmark)", "curve": [5000.0, 4991.368169, 4995.652657, 4994.175896, 5000.62345, 5001.986407, 4995.212522, 4994.118216, 5004.314217, 5005.893042, 5010.55918, 5009.212331, 5008.359441, 5010.377184, 5008.780107, 5013.715023, 5012.155175, 5006.527325, 5009.87302, 5007.407931, 5015.091829, 5014.006937, 5019.327585, 5011.161813, 5015.796535, 5015.99789, 5014.727548, 5022.301606, 5020.350795, 5019.442557, 5020.716265, 5018.670438, 5017.971771, 5025.423396, 5022.646639, 5023.643109, 5024.181968, 5019.835754, 5022.645017, 5020.236586, 5018.55354, 5022.33584, 5020.465657, 5016.232756, 5019.799419, 5019.762319, 5018.596374, 5019.819056, 5015.575336, 5017.214686, 5022.089697, 5018.340434, 5024.67491, 5030.482295, 5034.137322, 5028.719365, 5027.867937, 5035.936397, 5025.438269, 5030.67194, 5015.330021, 5013.180789, 5015.7516, 5014.638539, 5016.291055, 5013.438228, 5014.302438, 5017.726015, 5013.635719, 5012.197412, 5012.079198, 5013.693281, 5016.111043, 5021.889049, 5016.2083, 5011.754208, 5023.929314, 5021.848714, 5024.986401, 5021.33193, 5025.397747, 5021.603497, 5025.648285, 5026.901173, 5024.49321, 5012.746799, 5014.740629, 5013.873118, 5016.133412, 5017.643743, 5016.112314, 5020.49403, 5021.058182, 5019.969111, 5017.233981, 5017.728036, 5012.663707, 5013.414391, 4938.639414, 4930.940479, 4935.588332, 4937.048631, 4939.721219, 4941.044653, 4943.399831, 4939.090856, 4932.059407, 4934.198362, 4933.131613, 4945.151402, 4944.082197, 4944.767145, 4944.701043, 4945.34091, 4945.729787, 4944.136256, 4944.985834, 4947.987837, 4945.895287, 4942.112385, 4945.727744, 4948.183547, 4946.222939, 4949.727335, 4947.067099, 4947.213719, 4944.808462, 4937.774679, 4941.035117, 4940.878022, 4943.875992, 4937.631804, 4932.068653, 4937.336258, 4930.098933, 4964.440618, 4952.798431, 4952.419502, 4955.772456, 4947.606445, 4945.855518, 4946.93905, 4940.52855, 4941.279367, 4934.701001, 4935.225447, 4944.229444, 4942.816111, 4941.287008, 4942.860607, 4950.124672, 4946.605513, 4948.002506, 4947.574094, 4948.066252, 4947.911786, 4952.608086, 4952.367835, 4951.623725, 4945.461801, 4946.623801, 4950.305306, 4952.820807, 4954.837922, 4953.732481, 4949.599296, 4950.537692, 4948.537205, 4950.341915, 4948.623875, 4924.853142, 5036.31522, 5034.999482, 5035.988512, 5033.545878, 5038.748244, 5037.995933, 5036.334914, 5035.423543, 5035.765511, 5036.800829, 5036.87883, 5041.674153, 5042.70632, 5040.599762, 5044.829983, 5043.106212, 5039.766088, 5043.548359, 5041.01745, 5041.202589, 5040.038758, 5037.415903, 5036.463322, 5038.696991, 5043.37146, 5036.952394, 5037.376493, 5027.874221, 5029.948859, 5031.137696, 5039.554655, 5042.993815, 5041.880039], "baseline": 5000.0, "scored": false}]}</script></div><p class="axis-note">Horizontal axis is equity-snapshot order, not clock time — samples are taken during sessions only, so a time axis would draw a flat line across every night and weekend. Vertical rules mark session boundaries.</p>
+  </section>
+  <section class="panel"><h2>Standings</h2><table class="data"><thead><tr><th class="num">#</th><th>Team</th><th class="num">Equity</th><th class="num">Return</th><th class="num">P&amp;L</th><th class="num">Pos</th><th class="num">Fills</th><th class="num">Max DD</th><th class="num">Season pts</th></tr></thead><tbody><tr><td class="num">1</td><td><span class="swatch" style="background:var(--team-news-hound)"></span>News Hound</td><td class="num">$5,072.11</td><td class="num up">+1.44%</td><td class="num up">+72.11</td><td class="num">0</td><td class="num">79</td><td class="num">-1.17%</td><td class="num">15</td></tr><tr><td class="num">2</td><td><span class="swatch" style="background:var(--team-q-learner)"></span>Q-Learner</td><td class="num">$5,069.90</td><td class="num up">+1.40%</td><td class="num up">+69.90</td><td class="num">0</td><td class="num">28</td><td class="num">-0.35%</td><td class="num">11</td></tr><tr><td class="num">3</td><td><span class="swatch" style="background:var(--team-gambler)"></span>The Gambler</td><td class="num">$5,056.44</td><td class="num up">+1.13%</td><td class="num up">+56.44</td><td class="num">0</td><td class="num">38</td><td class="num">-0.48%</td><td class="num">8</td></tr><tr><td class="num">4</td><td><span class="swatch" style="background:var(--team-scalper)"></span>The Scalper</td><td class="num">$5,034.54</td><td class="num up">+0.69%</td><td class="num up">+34.54</td><td class="num">0</td><td class="num">447</td><td class="num">-0.41%</td><td class="num">6</td></tr><tr><td class="num">5</td><td><span class="swatch" style="background:var(--team-vol-breakout)"></span>Vol Breakout</td><td class="num">$5,025.05</td><td class="num up">+0.50%</td><td class="num up">+25.05</td><td class="num">0</td><td class="num">6</td><td class="num">-0.40%</td><td class="num">5</td></tr><tr><td class="num">6</td><td><span class="swatch" style="background:var(--team-mean-reverter)"></span>Mean Reverter</td><td class="num">$5,010.53</td><td class="num up">+0.21%</td><td class="num up">+10.53</td><td class="num">0</td><td class="num">2</td><td class="num">-0.02%</td><td class="num">4</td></tr><tr><td class="num">7</td><td><span class="swatch" style="background:var(--team-trend-rider)"></span>Trend Rider</td><td class="num">$4,992.30</td><td class="num down">-0.15%</td><td class="num down">-7.70</td><td class="num">0</td><td class="num">41</td><td class="num">-0.89%</td><td class="num">3</td></tr><tr><td class="num">8</td><td><span class="swatch" style="background:var(--team-stat-arb)"></span>Stat Arb</td><td class="num">$4,967.48</td><td class="num down">-0.65%</td><td class="num down">-32.52</td><td class="num">0</td><td class="num">3</td><td class="num">-0.96%</td><td class="num">2</td></tr><tr class="unscored"><td class="num">—</td><td><span class="swatch" style="background:var(--team-benchmark)"></span>Buy &amp; Hold (benchmark) <em>(unscored)</em></td><td class="num">$5,041.88</td><td class="num up">+0.84%</td><td class="num up">+41.88</td><td class="num">0</td><td class="num">3</td><td class="num">-2.21%</td><td class="num">0</td></tr></tbody></table></section>
+</section>
+
+<section class="panel-set hidden" id="tab-teams">
+  <div class="dossiers"><article class="dossier">
+  <header>
+    <span class="swatch" style="background:var(--team-news-hound)"></span>
+    <h3>News Hound</h3><span class="dossier-rank">#1</span>
+    <span class="dossier-ret up">+1.44%</span>
+  </header>
+  <p class="tagline">&ldquo;The tape tells you what happened. The wire tells you why.&rdquo;</p>
+  <p class="philosophy">Event-driven. Scores the Alpaca news wire with a finance-tuned sentiment lexicon (no LLM -- a deterministic, checked-in dictionary plus negation and intensifier handling), decays by age, weights by source and by how exclusively the story is about that ticker, then requires price confirmation before buying. Exits on sentiment decay or a time stop.</p>
+  <dl class="dossier-stats">
+    <div><dt>Equity</dt><dd class="num">$5,072.11</dd></div>
+    <div><dt>P&amp;L</dt><dd class="num up">
+      +72.11</dd></div>
+    <div><dt>Fills</dt><dd class="num">79</dd></div>
+    <div><dt>Traded</dt><dd class="num">$70,446.27</dd></div>
+    <div><dt>Max DD</dt><dd class="num">-1.17%</dd></div>
+    <div><dt>Season pts</dt><dd class="num">15</dd></div>
+  </dl>
+  <div class="dossier-holdings">
+    <span>Holding</span> flat
+  </div>
+  <div class="dossier-holdings">
+    <span>Universe</span> AAPL, GOOGL, MSFT
+  </div>
+</article><article class="dossier">
+  <header>
+    <span class="swatch" style="background:var(--team-q-learner)"></span>
+    <h3>Q-Learner</h3><span class="dossier-rank">#2</span>
+    <span class="dossier-ret up">+1.40%</span>
+  </header>
+  <p class="tagline">&ldquo;It doesn&#x27;t know what a stock is. It knows what worked.&rdquo;</p>
+  <p class="philosophy">Tabular Q-learning over a discretised state (trend bucket, dislocation bucket, volatility regime, current position) choosing among flat / half / full exposure. Reward is ATR-normalised P&amp;L minus a turnover penalty. Pre-trained offline on historical bars, then keeps learning online with a decaying epsilon. Its picker is a LinUCB contextual bandit -- same &quot;learn from reward&quot; philosophy, applied to universe selection.</p>
+  <dl class="dossier-stats">
+    <div><dt>Equity</dt><dd class="num">$5,069.90</dd></div>
+    <div><dt>P&amp;L</dt><dd class="num up">
+      +69.90</dd></div>
+    <div><dt>Fills</dt><dd class="num">28</dd></div>
+    <div><dt>Traded</dt><dd class="num">$19,003.75</dd></div>
+    <div><dt>Max DD</dt><dd class="num">-0.35%</dd></div>
+    <div><dt>Season pts</dt><dd class="num">11</dd></div>
+  </dl>
+  <div class="dossier-holdings">
+    <span>Holding</span> flat
+  </div>
+  <div class="dossier-holdings">
+    <span>Universe</span> AAPL, GOOGL, MSFT
+  </div>
+</article><article class="dossier">
+  <header>
+    <span class="swatch" style="background:var(--team-gambler)"></span>
+    <h3>The Gambler</h3><span class="dossier-rank">#3</span>
+    <span class="dossier-ret up">+1.13%</span>
+  </header>
+  <p class="tagline">&ldquo;Kelly said bet the edge. Kelly never said how big the edge was.&rdquo;</p>
+  <p class="philosophy">Deliberately high-variance. Estimates a win probability and payoff ratio from the recent tape, sizes with a *fractional Kelly multiplied up*, and concentrates. After a loss it steps size up (bounded, 3 rungs); after a win it resets. Prefers lottery-like names: high vol, wide range, gappy. Exists to answer &quot;does variance-seeking beat discipline over 3 weeks?&quot;</p>
+  <dl class="dossier-stats">
+    <div><dt>Equity</dt><dd class="num">$5,056.44</dd></div>
+    <div><dt>P&amp;L</dt><dd class="num up">
+      +56.44</dd></div>
+    <div><dt>Fills</dt><dd class="num">38</dd></div>
+    <div><dt>Traded</dt><dd class="num">$30,340.11</dd></div>
+    <div><dt>Max DD</dt><dd class="num">-0.48%</dd></div>
+    <div><dt>Season pts</dt><dd class="num">8</dd></div>
+  </dl>
+  <div class="dossier-holdings">
+    <span>Holding</span> flat
+  </div>
+  <div class="dossier-holdings">
+    <span>Universe</span> AAPL, GOOGL, MSFT
+  </div>
+</article><article class="dossier">
+  <header>
+    <span class="swatch" style="background:var(--team-scalper)"></span>
+    <h3>The Scalper</h3><span class="dossier-rank">#4</span>
+    <span class="dossier-ret up">+0.69%</span>
+  </header>
+  <p class="tagline">&ldquo;A penny a hundred times beats a dollar you waited all week for.&rdquo;</p>
+  <p class="philosophy">Microstructure. Computes a microprice fair value from top-of-book sizes plus a short-horizon order-flow drift, then works passive limit bids below fair value and passive offers above it, skewed by inventory. Hundreds of small round trips, inventory capped, flat into the close.</p>
+  <dl class="dossier-stats">
+    <div><dt>Equity</dt><dd class="num">$5,034.54</dd></div>
+    <div><dt>P&amp;L</dt><dd class="num up">
+      +34.54</dd></div>
+    <div><dt>Fills</dt><dd class="num">447</dd></div>
+    <div><dt>Traded</dt><dd class="num">$112,409.77</dd></div>
+    <div><dt>Max DD</dt><dd class="num">-0.41%</dd></div>
+    <div><dt>Season pts</dt><dd class="num">6</dd></div>
+  </dl>
+  <div class="dossier-holdings">
+    <span>Holding</span> flat
+  </div>
+  <div class="dossier-holdings">
+    <span>Universe</span> AAPL, GOOGL, MSFT
+  </div>
+</article><article class="dossier">
+  <header>
+    <span class="swatch" style="background:var(--team-vol-breakout)"></span>
+    <h3>Vol Breakout</h3><span class="dossier-rank">#5</span>
+    <span class="dossier-ret up">+0.50%</span>
+  </header>
+  <p class="tagline">&ldquo;Quiet, quiet, quiet -- then you have to already be in.&rdquo;</p>
+  <p class="philosophy">Volatility-regime trading. Waits for a squeeze (Bollinger bandwidth in its own low percentile), then buys the Donchian channel break confirmed by range and volume expansion. Exits on a Chandelier trail. Its picker hunts coiled springs, not current winners.</p>
+  <dl class="dossier-stats">
+    <div><dt>Equity</dt><dd class="num">$5,025.05</dd></div>
+    <div><dt>P&amp;L</dt><dd class="num up">
+      +25.05</dd></div>
+    <div><dt>Fills</dt><dd class="num">6</dd></div>
+    <div><dt>Traded</dt><dd class="num">$7,781.43</dd></div>
+    <div><dt>Max DD</dt><dd class="num">-0.40%</dd></div>
+    <div><dt>Season pts</dt><dd class="num">5</dd></div>
+  </dl>
+  <div class="dossier-holdings">
+    <span>Holding</span> flat
+  </div>
+  <div class="dossier-holdings">
+    <span>Universe</span> AAPL, GOOGL, MSFT
+  </div>
+</article><article class="dossier">
+  <header>
+    <span class="swatch" style="background:var(--team-mean-reverter)"></span>
+    <h3>Mean Reverter</h3><span class="dossier-rank">#6</span>
+    <span class="dossier-ret up">+0.21%</span>
+  </header>
+  <p class="tagline">&ldquo;Everything snaps back. Size the rubber band, not the drama.&rdquo;</p>
+  <p class="philosophy">Buys statistical dislocation: price two-plus sigma below its own short mean with a stretched RSI, sized inverse to volatility, scaled in over two tranches, out at the mean. Refuses names whose measured OU half-life says they don&#x27;t revert.</p>
+  <dl class="dossier-stats">
+    <div><dt>Equity</dt><dd class="num">$5,010.53</dd></div>
+    <div><dt>P&amp;L</dt><dd class="num up">
+      +10.53</dd></div>
+    <div><dt>Fills</dt><dd class="num">2</dd></div>
+    <div><dt>Traded</dt><dd class="num">$4,011.24</dd></div>
+    <div><dt>Max DD</dt><dd class="num">-0.02%</dd></div>
+    <div><dt>Season pts</dt><dd class="num">4</dd></div>
+  </dl>
+  <div class="dossier-holdings">
+    <span>Holding</span> flat
+  </div>
+  <div class="dossier-holdings">
+    <span>Universe</span> AAPL, GOOGL, MSFT
+  </div>
+</article><article class="dossier">
+  <header>
+    <span class="swatch" style="background:var(--team-trend-rider)"></span>
+    <h3>Trend Rider</h3><span class="dossier-rank">#7</span>
+    <span class="dossier-ret down">-0.15%</span>
+  </header>
+  <p class="tagline">&ldquo;The trend is your friend until the ATR says otherwise.&rdquo;</p>
+  <p class="philosophy">Cross-sectional + time-series momentum. Buys what is already working, ranks candidates by risk-adjusted trend quality, and rides with a volatility-scaled trailing stop. Adds on strength, never on weakness.</p>
+  <dl class="dossier-stats">
+    <div><dt>Equity</dt><dd class="num">$4,992.30</dd></div>
+    <div><dt>P&amp;L</dt><dd class="num down">
+      -7.70</dd></div>
+    <div><dt>Fills</dt><dd class="num">41</dd></div>
+    <div><dt>Traded</dt><dd class="num">$47,379.64</dd></div>
+    <div><dt>Max DD</dt><dd class="num">-0.89%</dd></div>
+    <div><dt>Season pts</dt><dd class="num">3</dd></div>
+  </dl>
+  <div class="dossier-holdings">
+    <span>Holding</span> flat
+  </div>
+  <div class="dossier-holdings">
+    <span>Universe</span> AAPL, GOOGL, MSFT
+  </div>
+</article><article class="dossier">
+  <header>
+    <span class="swatch" style="background:var(--team-stat-arb)"></span>
+    <h3>Stat Arb</h3><span class="dossier-rank">#8</span>
+    <span class="dossier-ret down">-0.65%</span>
+  </header>
+  <p class="tagline">&ldquo;I don&#x27;t care where the market goes. I care where the spread goes.&rdquo;</p>
+  <p class="philosophy">Relative value. Finds pairs with a stationary spread (correlation, OLS hedge ratio, ADF t-stat, half-life), then trades the spread&#x27;s z-score. Because the competition is long-only, it expresses the pair as a *rotation*: hold the cheap leg, switch when the spread flips, flat when the spread is fair. Market-neutral in spirit, cash-account in practice.</p>
+  <dl class="dossier-stats">
+    <div><dt>Equity</dt><dd class="num">$4,967.48</dd></div>
+    <div><dt>P&amp;L</dt><dd class="num down">
+      -32.52</dd></div>
+    <div><dt>Fills</dt><dd class="num">3</dd></div>
+    <div><dt>Traded</dt><dd class="num">$4,147.51</dd></div>
+    <div><dt>Max DD</dt><dd class="num">-0.96%</dd></div>
+    <div><dt>Season pts</dt><dd class="num">2</dd></div>
+  </dl>
+  <div class="dossier-holdings">
+    <span>Holding</span> flat
+  </div>
+  <div class="dossier-holdings">
+    <span>Universe</span> AAPL, GOOGL, MSFT
+  </div>
+</article><article class="dossier">
+  <header>
+    <span class="swatch" style="background:var(--team-benchmark)"></span>
+    <h3>Buy &amp; Hold (benchmark)</h3>
+    <span class="dossier-ret up">+0.84%</span>
+  </header>
+  <p class="tagline">&ldquo;Does any of this beat just owning the thing?&rdquo;</p>
+  <p class="philosophy">Not a competitor. Buys an equal-weight basket of its universe on the first tick of the round and never trades again. Present in every report so each team&#x27;s result can be read against the market it faced.</p>
+  <dl class="dossier-stats">
+    <div><dt>Equity</dt><dd class="num">$5,041.88</dd></div>
+    <div><dt>P&amp;L</dt><dd class="num up">
+      +41.88</dd></div>
+    <div><dt>Fills</dt><dd class="num">3</dd></div>
+    <div><dt>Traded</dt><dd class="num">$4,896.12</dd></div>
+    <div><dt>Max DD</dt><dd class="num">-2.21%</dd></div>
+    <div><dt>Season pts</dt><dd class="num">0</dd></div>
+  </dl>
+  <div class="dossier-holdings">
+    <span>Holding</span> flat
+  </div>
+  <div class="dossier-holdings">
+    <span>Universe</span> AAPL, GOOGL, MSFT
+  </div>
+</article></div>
+</section>
+
+<section class="panel-set hidden" id="tab-season">
+  <section class="panel">
+  <h2>Season schedule</h2>
+  <table class="plan">
+    <thead><tr><th>#</th><th>Round</th><th>Window</th><th>State</th></tr></thead>
+    <tbody>
+<tr class="done"><td class="num">1</td><td>The Big Three</td><td>Mon 21 Sep - Fri 25 Sep</td><td><span class="pill done">done</span></td></tr>
+<tr class="upcoming"><td class="num">2</td><td>Open Market</td><td>Mon 28 Sep - Fri 02 Oct</td><td><span class="pill upcoming">upcoming</span></td></tr>
+<tr class="upcoming"><td class="num">3</td><td>Chaos Draft</td><td>Mon 05 Oct - Fri 09 Oct</td><td><span class="pill upcoming">upcoming</span></td></tr>
+    </tbody>
+  </table>
+</section>
+  <section class="panel"><h2>Season standings</h2><table class="data"><thead><tr><th class="num">#</th><th>Team</th><th class="num">Points</th><th class="num">R1</th><th class="num">Compounded</th><th class="num">Wins</th></tr></thead><tbody><tr><td class="num">1</td><td><span class="swatch" style="background:var(--team-news-hound)"></span>News Hound</td><td class="num strong">15</td><td class="num up">+1.44%</td><td class="num up">+1.44%</td><td class="num">1</td></tr><tr><td class="num">2</td><td><span class="swatch" style="background:var(--team-q-learner)"></span>Q-Learner</td><td class="num strong">11</td><td class="num up">+1.40%</td><td class="num up">+1.40%</td><td class="num">0</td></tr><tr><td class="num">3</td><td><span class="swatch" style="background:var(--team-gambler)"></span>The Gambler</td><td class="num strong">8</td><td class="num up">+1.13%</td><td class="num up">+1.13%</td><td class="num">0</td></tr><tr><td class="num">4</td><td><span class="swatch" style="background:var(--team-scalper)"></span>The Scalper</td><td class="num strong">6</td><td class="num up">+0.69%</td><td class="num up">+0.69%</td><td class="num">0</td></tr><tr><td class="num">5</td><td><span class="swatch" style="background:var(--team-vol-breakout)"></span>Vol Breakout</td><td class="num strong">5</td><td class="num up">+0.52%</td><td class="num up">+0.52%</td><td class="num">0</td></tr><tr><td class="num">6</td><td><span class="swatch" style="background:var(--team-mean-reverter)"></span>Mean Reverter</td><td class="num strong">4</td><td class="num up">+0.21%</td><td class="num up">+0.21%</td><td class="num">0</td></tr><tr><td class="num">7</td><td><span class="swatch" style="background:var(--team-trend-rider)"></span>Trend Rider</td><td class="num strong">3</td><td class="num down">-0.14%</td><td class="num down">-0.14%</td><td class="num">0</td></tr><tr><td class="num">8</td><td><span class="swatch" style="background:var(--team-stat-arb)"></span>Stat Arb</td><td class="num strong">2</td><td class="num down">-0.65%</td><td class="num down">-0.65%</td><td class="num">0</td></tr><tr class="unscored"><td class="num">&mdash;</td><td><span class="swatch" style="background:var(--team-benchmark)"></span>Buy &amp; Hold (benchmark)</td><td class="num strong">0</td><td class="num up">+0.86%</td><td class="num up">+0.86%</td><td class="num">0</td></tr></tbody></table></section>
+</section>
+
+<section class="panel-set hidden" id="tab-activity">
+  <section class="panel"><h2>Trade tape</h2><table class="data tape"><thead><tr><th>Time</th><th>Team</th><th>Side</th><th class="num">Qty</th><th>Symbol</th><th class="num">Price</th><th>Why</th></tr></thead><tbody><tr><td class="dim num">19:46:54</td><td><span class="swatch sm" style="background:var(--team-gambler)"></span>The Gambler</td><td class="side-buy">BUY</td><td class="num">1.23</td><td>GOOGL</td><td class="num">344.25</td><td class="dim reason">kelly bet w=0.08 (p=0.47 b=1.32 f*=0.062 rung 0 x1.00)</td></tr><tr><td class="dim num">19:46:53</td><td><span class="swatch sm" style="background:var(--team-gambler)"></span>The Gambler</td><td class="side-sell">SELL</td><td class="num">1.302</td><td>AAPL</td><td class="num">341.12</td><td class="dim reason">target hit (+4.1 ATR)</td></tr><tr><td class="dim num">19:45:17</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">2.788</td><td>GOOGL</td><td class="num">344.13</td><td class="dim reason">flatten into the close</td></tr><tr><td class="dim num">19:45:17</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">3.529</td><td>AAPL</td><td class="num">341.10</td><td class="dim reason">flatten into the close</td></tr><tr><td class="dim num">19:45:09</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">0.7036</td><td>AAPL</td><td class="num">341.12</td><td class="dim reason">offer 341.12 vs fair 341.05 (skew 3.7bps, inv 29%)</td></tr><tr><td class="dim num">19:44:36</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-buy">BUY</td><td class="num">0.6977</td><td>GOOGL</td><td class="num">343.96</td><td class="dim reason">bid 343.96 vs fair 344.24 (spread 26.7bps, imb -0.33, drift +0.010%)</td></tr><tr><td class="dim num">19:42:42</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-buy">BUY</td><td class="num">0.7044</td><td>AAPL</td><td class="num">340.70</td><td class="dim reason">bid 340.70 vs fair 341.01 (spread 11.7bps, imb +0.00, drift +0.212%)</td></tr><tr><td class="dim num">19:41:59</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-buy">BUY</td><td class="num">0.6969</td><td>GOOGL</td><td class="num">343.99</td><td class="dim reason">bid 344.40 vs fair 344.65 (spread 29.6bps, imb +0.00, drift +0.137%)</td></tr><tr><td class="dim num">19:40:55</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">1.066</td><td>MSFT</td><td class="num">515.76</td><td class="dim reason">inventory stop (-46bps)</td></tr><tr><td class="dim num">19:40:54</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">1</td><td>MSFT</td><td class="num">515.76</td><td class="dim reason">inventory stop (-46bps)</td></tr><tr><td class="dim num">19:40:20</td><td><span class="swatch sm" style="background:var(--team-trend-rider)"></span>Trend Rider</td><td class="side-buy">BUY</td><td class="num">2.342</td><td>AAPL</td><td class="num">340.72</td><td class="dim reason">pyramid #1 (1.9 ATR onside)</td></tr><tr><td class="dim num">19:40:20</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-buy">BUY</td><td class="num">0.6968</td><td>GOOGL</td><td class="num">343.96</td><td class="dim reason">bid 344.46 vs fair 344.68 (spread 29.3bps, imb +0.00, drift +0.160%)</td></tr><tr><td class="dim num">19:39:14</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-buy">BUY</td><td class="num">0.6968</td><td>GOOGL</td><td class="num">343.94</td><td class="dim reason">bid 344.43 vs fair 344.64 (spread 30.2bps, imb +0.00, drift +0.134%)</td></tr><tr><td class="dim num">19:34:19</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">4.388</td><td>GOOGL</td><td class="num">343.31</td><td class="dim reason">inventory stop (-58bps)</td></tr><tr><td class="dim num">19:32:40</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-buy">BUY</td><td class="num">0.003839</td><td>MSFT</td><td class="num">515.90</td><td class="dim reason">bid 515.99 vs fair 516.44 (spread 15.9bps, imb +0.00, drift +0.124%)</td></tr><tr><td class="dim num">19:19:31</td><td><span class="swatch sm" style="background:var(--team-vol-breakout)"></span>Vol Breakout</td><td class="side-sell">SELL</td><td class="num">4.535</td><td>GOOGL</td><td class="num">344.21</td><td class="dim reason">chandelier trail from 344.71</td></tr><tr><td class="dim num">19:14:15</td><td><span class="swatch sm" style="background:var(--team-trend-rider)"></span>Trend Rider</td><td class="side-sell">SELL</td><td class="num">1.087</td><td>MSFT</td><td class="num">515.77</td><td class="dim reason">trail stop 516.25</td></tr><tr><td class="dim num">19:14:13</td><td><span class="swatch sm" style="background:var(--team-trend-rider)"></span>Trend Rider</td><td class="side-sell">SELL</td><td class="num">2</td><td>MSFT</td><td class="num">515.77</td><td class="dim reason">trail stop 516.25</td></tr><tr><td class="dim num">18:42:51</td><td><span class="swatch sm" style="background:var(--team-q-learner)"></span>Q-Learner</td><td class="side-buy">BUY</td><td class="num">1.665</td><td>MSFT</td><td class="num">517.65</td><td class="dim reason">q-policy w=0.32 Q=-0.129 [explore] eps=0.020</td></tr><tr><td class="dim num">18:42:51</td><td><span class="swatch sm" style="background:var(--team-q-learner)"></span>Q-Learner</td><td class="side-sell">SELL</td><td class="num">2.207</td><td>GOOGL</td><td class="num">344.02</td><td class="dim reason">q-policy w=0.00 Q=+0.000 eps=0.020</td></tr><tr><td class="dim num">18:37:42</td><td><span class="swatch sm" style="background:var(--team-vol-breakout)"></span>Vol Breakout</td><td class="side-buy">BUY</td><td class="num">4.573</td><td>AAPL</td><td class="num">340.10</td><td class="dim reason">breakout over 336.56 (OR), squeeze released 0b ago (6%ile bandwidth), vol 1.50x, range 1.99x</td></tr><tr><td class="dim num">18:24:26</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-buy">BUY</td><td class="num">0.4626</td><td>MSFT</td><td class="num">518.83</td><td class="dim reason">bid 518.83 vs fair 519.25 (spread 3.9bps, imb +0.67, drift +0.072%)</td></tr><tr><td class="dim num">18:22:23</td><td><span class="swatch sm" style="background:var(--team-q-learner)"></span>Q-Learner</td><td class="side-sell">SELL</td><td class="num">1.759</td><td>MSFT</td><td class="num">518.91</td><td class="dim reason">q-policy w=0.15 Q=-0.114 eps=0.020</td></tr><tr><td class="dim num">18:19:36</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">0.4629</td><td>MSFT</td><td class="num">518.50</td><td class="dim reason">offer 518.49 vs fair 518.32 (skew 2.8bps, inv 21%)</td></tr><tr><td class="dim num">18:18:56</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-buy">BUY</td><td class="num">0.07089</td><td>MSFT</td><td class="num">518.31</td><td class="dim reason">bid 518.32 vs fair 518.77 (spread 11.0bps, imb -0.33, drift +0.092%)</td></tr><tr><td class="dim num">18:17:35</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-buy">BUY</td><td class="num">0.7053</td><td>AAPL</td><td class="num">340.21</td><td class="dim reason">bid 340.27 vs fair 340.56 (spread 7.9bps, imb +0.60, drift +0.056%)</td></tr><tr><td class="dim num">18:06:51</td><td><span class="swatch sm" style="background:var(--team-q-learner)"></span>Q-Learner</td><td class="side-buy">BUY</td><td class="num">2.207</td><td>GOOGL</td><td class="num">344.42</td><td class="dim reason">q-policy w=0.15 Q=-0.106 [explore] eps=0.020</td></tr><tr><td class="dim num">18:05:59</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-buy">BUY</td><td class="num">0.00454</td><td>GOOGL</td><td class="num">344.45</td><td class="dim reason">bid 344.46 vs fair 344.80 (spread 16.8bps, imb +0.00, drift +0.189%)</td></tr><tr><td class="dim num">18:04:50</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-buy">BUY</td><td class="num">0.2043</td><td>GOOGL</td><td class="num">344.78</td><td class="dim reason">bid 344.91 vs fair 345.25 (spread 50.1bps, imb +0.00, drift +0.105%)</td></tr><tr><td class="dim num">18:03:49</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-buy">BUY</td><td class="num">0.4634</td><td>MSFT</td><td class="num">517.90</td><td class="dim reason">bid 517.93 vs fair 518.35 (spread 6.4bps, imb +0.00, drift +0.122%)</td></tr><tr><td class="dim num">18:03:47</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-buy">BUY</td><td class="num">0.7055</td><td>AAPL</td><td class="num">340.18</td><td class="dim reason">bid 340.18 vs fair 340.44 (spread 7.9bps, imb -0.33, drift +0.107%)</td></tr><tr><td class="dim num">18:02:46</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-buy">BUY</td><td class="num">0.7056</td><td>AAPL</td><td class="num">340.12</td><td class="dim reason">bid 340.12 vs fair 340.37 (spread 10.0bps, imb +0.00, drift +0.032%)</td></tr><tr><td class="dim num">18:02:42</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-buy">BUY</td><td class="num">0.4634</td><td>MSFT</td><td class="num">517.86</td><td class="dim reason">bid 517.86 vs fair 518.25 (spread 5.4bps, imb +0.00, drift +0.184%)</td></tr><tr><td class="dim num">18:01:54</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">0.4631</td><td>MSFT</td><td class="num">518.27</td><td class="dim reason">offer 518.27 vs fair 518.06 (skew 2.0bps, inv 16%)</td></tr><tr><td class="dim num">18:01:31</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">0.4634</td><td>MSFT</td><td class="num">517.96</td><td class="dim reason">offer 517.96 vs fair 517.27 (skew 2.7bps, inv 20%)</td></tr><tr><td class="dim num">18:00:22</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">0.4634</td><td>MSFT</td><td class="num">518.02</td><td class="dim reason">offer 517.96 vs fair 517.27 (skew 3.3bps, inv 25%)</td></tr><tr><td class="dim num">18:00:19</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">0.4633</td><td>MSFT</td><td class="num">518.02</td><td class="dim reason">offer 517.99 vs fair 517.88 (skew 3.9bps, inv 30%)</td></tr><tr><td class="dim num">18:00:05</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-buy">BUY</td><td class="num">0.6971</td><td>GOOGL</td><td class="num">344.26</td><td class="dim reason">bid 344.27 vs fair 344.58 (spread 12.8bps, imb +0.00, drift +0.074%)</td></tr><tr><td class="dim num">17:59:37</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-buy">BUY</td><td class="num">0.4597</td><td>MSFT</td><td class="num">517.82</td><td class="dim reason">bid 517.83 vs fair 518.31 (spread 5.2bps, imb -0.33, drift +0.152%)</td></tr><tr><td class="dim num">17:59:24</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">0.4634</td><td>MSFT</td><td class="num">517.88</td><td class="dim reason">offer 517.87 vs fair 517.65 (skew 3.9bps, inv 30%)</td></tr></tbody></table></section>
+</section>
+
+<footer>
+  <span>data: live Alpaca paper accounts</span>
+  <span>rules: 4d73ff50a44029d6</span>
+  <span>bankroll: $5,000.00 per team per round</span>
+  <span>updated 21:19:35 UTC</span>
+  <span>auto-refresh: 30s</span>
+</footer>
+<script>
+(function () {
+  // Tabs. Plain buttons toggling panels: no router, no history entries, and
+  // the whole page still works if this script never runs (all panels would
+  // simply be visible).
+  var tabs = document.querySelectorAll('.tab');
+  function show(id) {
+    document.querySelectorAll('.panel-set').forEach(function (p) {
+      p.classList.toggle('hidden', p.id !== 'tab-' + id);
+    });
+    tabs.forEach(function (t) {
+      t.classList.toggle('on', t.getAttribute('data-tab') === id);
+    });
+    try { localStorage.setItem('comp-tab', id); } catch (e) { /* private mode */ }
+  }
+  tabs.forEach(function (t) {
+    t.addEventListener('click', function () { show(t.getAttribute('data-tab')); });
+  });
+  // Survive the 30-second auto-refresh on whichever tab the visitor chose.
+  try {
+    var saved = localStorage.getItem('comp-tab');
+    if (saved && document.getElementById('tab-' + saved)) show(saved);
+  } catch (e) { /* ignore */ }
+})();
+
+(function () {
+  // Grow the race bars from zero on load, so a refresh feels like movement
+  // rather than a redraw.
+  window.requestAnimationFrame(function () {
+    document.querySelectorAll('.race-bar').forEach(function (b) {
+      var w = b.style.width;
+      b.style.width = '0%';
+      window.requestAnimationFrame(function () { b.style.width = w; });
+    });
+  });
+})();
+
+(function () {
+  // The season countdown. Ticks locally so it stays smooth between the
+  // page's periodic regenerations.
+  var el = document.querySelector('[data-deadline]');
+  if (!el) return;
+  var target = new Date(el.getAttribute('data-deadline')).getTime();
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function tick() {
+    var left = Math.max(0, Math.floor((target - Date.now()) / 1000));
+    var d = Math.floor(left / 86400);
+    var h = Math.floor((left % 86400) / 3600);
+    var m = Math.floor((left % 3600) / 60);
+    var s = left % 60;
+    el.textContent = d > 0
+      ? d + 'd ' + pad(h) + ':' + pad(m) + ':' + pad(s)
+      : pad(h) + ':' + pad(m) + ':' + pad(s);
+    if (left === 0) { el.textContent = '00:00:00'; return; }
+    setTimeout(tick, 1000);
+  }
+  tick();
+})();
+
+(function () {
+  var node = document.getElementById('chart-data');
+  if (!node) return;
+  var data = JSON.parse(node.textContent);
+  var svg = document.querySelector('.chart');
+  var target = document.getElementById('hover-target');
+  var cross = document.getElementById('crosshair');
+  var tip = document.getElementById('tooltip');
+  if (!svg || !target || !tip) return;
+
+  var plotW = data.w - data.padL - data.padR;
+
+  function xOf(i) { return data.padL + (i / Math.max(data.n - 1, 1)) * plotW; }
+
+  function show(evt) {
+    var box = svg.getBoundingClientRect();
+    var scale = data.w / box.width;
+    var svgX = (evt.clientX - box.left) * scale;
+    var frac = (svgX - data.padL) / plotW;
+    var i = Math.round(frac * Math.max(data.n - 1, 1));
+    if (i < 0) i = 0;
+    if (i > data.n - 1) i = data.n - 1;
+
+    cross.setAttribute('x1', xOf(i));
+    cross.setAttribute('x2', xOf(i));
+    cross.style.display = '';
+
+    var rows = data.series.map(function (s) {
+      var v = s.curve[Math.min(i, s.curve.length - 1)];
+      var ret = s.baseline ? (v / s.baseline - 1) * 100 : 0;
+      return { name: s.name, key: s.key, v: v, ret: ret, scored: s.scored };
+    }).sort(function (a, b) { return b.ret - a.ret; });
+
+    var stamp = data.stamps[Math.min(i, data.stamps.length - 1)] || '';
+    var html = '<div class="tip-head">' + stamp.replace('T', ' ').slice(0, 16) +
+               ' UTC</div>';
+    rows.forEach(function (r) {
+      var cls = r.ret > 0 ? 'up' : (r.ret < 0 ? 'down' : 'flat');
+      html += '<div class="tip-row"><span class="swatch sm" style="background:' +
+              'var(--team-' + r.key.replace(/_/g, '-') + ')"></span>' +
+              '<span class="tip-name">' + r.name + (r.scored ? '' : ' *') +
+              '</span><span class="tip-val">$' +
+              r.v.toLocaleString(undefined, { minimumFractionDigits: 2,
+                                              maximumFractionDigits: 2 }) +
+              '</span><span class="tip-ret ' + cls + '">' +
+              (r.ret >= 0 ? '+' : '') + r.ret.toFixed(2) + '%</span></div>';
+    });
+    tip.innerHTML = html;
+    tip.hidden = false;
+
+    var wrapBox = svg.parentElement.getBoundingClientRect();
+    var px = evt.clientX - wrapBox.left + 16;
+    if (px + tip.offsetWidth > wrapBox.width) {
+      px = evt.clientX - wrapBox.left - tip.offsetWidth - 16;
+    }
+    tip.style.left = Math.max(px, 4) + 'px';
+    tip.style.top = '12px';
+  }
+
+  function hide() { cross.style.display = 'none'; tip.hidden = true; }
+
+  target.addEventListener('mousemove', show);
+  target.addEventListener('mouseleave', hide);
+  target.addEventListener('touchmove', function (e) {
+    if (e.touches.length) { show(e.touches[0]); e.preventDefault(); }
+  }, { passive: false });
+})();
+</script>
+</body>
+</html>
