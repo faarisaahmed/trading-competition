@@ -117,7 +117,7 @@ may not screen for oversold names — so the coupling is documented per team and
 | **News Hound** | Lexicon-scored news with age decay, exclusivity and source weighting, gated on tape confirmation and a hard no-chase rule | names the wire is actually talking about, positively |
 | **Vol Breakout** | Buys the Donchian/opening-range break out of a TTM squeeze, confirmed by volume and range expansion; Chandelier trail with a failed-break override | coiled springs — compressed, quiet, but with a normal range worth releasing |
 | **The Scalper** | One-sided passive market making around a microprice fair value with queue-imbalance and drift adjustments, linear inventory skew, flat into the close | tight, heavily traded, *low*-volatility names — chop, not trend |
-| *Buy & Hold* | *Unscored reference. Equal-weight basket, never trades.* | *most liquid names* |
+| *Buy & Hold* | *Unscored reference. Buys on the first tick, never trades again.* | *Round 1's three names; SPY (the S&P 500) in Rounds 2 and 3* |
 
 `comp teams` prints every parameter of every team, with documentation.
 

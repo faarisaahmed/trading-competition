@@ -425,6 +425,10 @@ least wants to be.
 Buys an equal-weight basket of its universe on the first tradable tick and does
 nothing else. It takes no place and no points and cannot displace a real team.
 
+Its universe is the market itself, not a pick from it: in Round 1 it holds the
+same three names as everyone, and in Rounds 2 and 3 it holds **SPY**, the S&P
+500 (`fixed_universe` in `config/teams.yaml`). It is dealt no Round 3 hand.
+
 It is in every report because "+3.1% over the week" means nothing on its own.
 If the market ran 4% and the winner made 3%, the interesting fact is that
 **nobody beat the basket** — and without this line in the table, nobody would

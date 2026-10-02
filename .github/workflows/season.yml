@@ -1,14 +1,16 @@
 # Runs the competition on GitHub's machines, so nothing has to stay awake.
 #
-# A session is 13:30-20:00 UTC (09:30-16:00 ET), which is longer than the
-# six hours a single job may run. So the day is split in two and the baton is
-# passed on disk: the engine checkpoints every tick, and `state pull/push`
-# carries the ledger between jobs on a branch. The second job resumes the
-# round exactly where the first left it -- it is never flattened or scored
-# early.
+# One job may run for at most six hours, so the season is a CHAIN of jobs:
+# each runs for a fixed budget (`--until auto`), saves the ledger, and starts
+# its own successor with `gh workflow run`. The baton is passed on disk: the
+# engine checkpoints every tick, and `state pull/push` carries the ledger
+# between jobs on a branch. The next job resumes the round exactly where the
+# last left it -- it is never flattened or scored early.
 #
-# Times are fixed UTC. The season (21 Sep - 9 Oct 2026) sits entirely inside
-# US daylight time, so no offset changes mid-competition.
+# Why a chain and not cron: in practice GitHub fired the cron below only two
+# or three times a day, the first rarely before 17:00 UTC, so every session
+# of Round 1 and the first Round 2 lost its first three to four hours. Cron
+# stays as a backstop that restarts a broken chain.
 
 name: Season
 
@@ -27,9 +29,9 @@ on:
   workflow_dispatch:
     inputs:
       until:
-        description: "UTC HH:MM to stop at"
+        description: "UTC HH:MM to stop at, or 'auto' for the standard budget"
         required: false
-        default: "20:10"
+        default: "auto"
 
 # Exactly one at a time: two processes trading the same three accounts would
 # be a catastrophe, not a race condition.
@@ -46,10 +48,12 @@ concurrency:
 jobs:
   trade:
     runs-on: ubuntu-latest
-    # A hard ceiling under GitHub's 6h limit; the app stops itself before this.
-    timeout-minutes: 240
+    # A hard ceiling under GitHub's 6h limit; the app stops itself well
+    # before this (cli.JOB_BUDGET), leaving time to save the ledger.
+    timeout-minutes: 345
     permissions:
       contents: write        # push the dashboard and the ledger
+      actions: write         # start the next job in the chain
 
     env:
       ALPACA_GROUP_A_KEY_ID: ${{ secrets.ALPACA_GROUP_A_KEY_ID }}
@@ -111,3 +115,20 @@ jobs:
           path: runs/*.log
           if-no-files-found: ignore
           retention-days: 14
+
+      # Start the next link. It queues behind this job (same concurrency
+      # group) and begins the moment this one ends. A failed job still hands
+      # over -- a transient Alpaca error mid-session must not cost the rest
+      # of the day -- but after a pause, so a persistent fault retries every
+      # few minutes instead of spinning.
+      - name: Hand over to the next job
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if comp season --dry-run --no-publish | grep -q "phase now: done"; then
+            echo "Season finished; ending the chain."
+            exit 0
+          fi
+          if [ "${{ job.status }}" != "success" ]; then sleep 300; fi
+          gh workflow run season.yml --ref "${{ github.ref_name }}"

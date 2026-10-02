@@ -221,6 +221,27 @@ position held through a two-hour outage gets whatever price exists on restart,
 and its stops did not run in between. The round is salvaged, not rewound —
 note the outage alongside the results.
 
+**A whole round was broken and must be played again.** This happened to the
+first Round 2 (28 Sep - 2 Oct): a data bug left every team with an empty
+universe, so nobody traded. To replay a round:
+
+1. Postpone it in `config/competition.yaml`. Later rounds follow on from it:
+   ```yaml
+   schedule:
+     round_starts:
+       2: 2026-10-05
+   ```
+2. Strike the dead run from the ledger, with no Season job running (check
+   the Actions tab), so no job overwrites the ledger with its own copy:
+   ```bash
+   comp state pull
+   comp void-round 2 --reason "empty universe all week; replayed from 5 Oct"         # dry run
+   comp void-round 2 --reason "empty universe all week; replayed from 5 Oct" --yes
+   comp state push
+   ```
+   Its results move to `voided_results`, and the run is marked `void` so
+   nothing resumes into it. Trades and events stay in the ledger.
+
 **One team's credentials are broken.** `comp run --allow-missing` runs only the
 funded teams. Note it in the results: a round with seven entries is not the same
 round.

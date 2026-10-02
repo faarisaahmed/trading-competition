@@ -106,6 +106,9 @@ class UniverseResolver:
         if rnd.draft is None:
             raise ValueError(f"round {rnd.id} has no draft configuration")
         d = rnd.draft
+        # A team with its own fixed universe takes no hand: dealing it ten
+        # names it will never trade would only shrink everyone else's pool.
+        teams = [t for t in teams if not t.fixed_symbols(rnd.id)]
         if snapshot is None:
             if self.provider is None:
                 raise ValueError("a UniverseProvider or an explicit snapshot is required")
@@ -175,6 +178,13 @@ class UniverseResolver:
         sectors: Mapping[str, str] | None = None,
     ) -> ResolvedUniverse:
         """The team's tradable symbols for this session."""
+        pinned = team.fixed_symbols(rnd.id)
+        if pinned:
+            return ResolvedUniverse(
+                team.key, pinned, "fixed(team)",
+                {"round": rnd.id, "note": f"{team.key}'s own fixed universe; "
+                                          "no picker, no draft hand"},
+            )
         if rnd.universe_mode == "fixed":
             return ResolvedUniverse(
                 team.key, tuple(rnd.symbols), "fixed",

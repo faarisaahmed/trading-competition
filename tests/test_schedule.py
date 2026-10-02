@@ -266,37 +266,24 @@ def test_sessions_per_round_must_be_positive():
 # --------------------------------------------------------------------------- #
 
 
-def test_the_window_boundaries_fit_inside_a_ci_job():
-    """A session is longer than one job may run, hence two windows."""
-    from competition.cli import HANDOVER_UTC, SESSION_END_UTC
+def test_an_auto_run_fits_inside_the_ci_job():
+    """The budget must end before the workflow's timeout kills the job."""
+    import re
+    from pathlib import Path
 
-    open_utc = 13 * 60 + 30
-    handover = HANDOVER_UTC[0] * 60 + HANDOVER_UTC[1]
-    end = SESSION_END_UTC[0] * 60 + SESSION_END_UTC[1]
+    from competition.cli import JOB_BUDGET
 
-    assert open_utc < handover < end
-    assert end >= 20 * 60, "must cover the 20:00 UTC close"
-    # Each half has to finish well inside GitHub's six-hour ceiling, counting
-    # from the earliest trigger that could start it.
-    assert handover - (12 * 60 + 5) < 5 * 60
-    assert end - handover < 5 * 60
+    wf = (Path(__file__).resolve().parents[1] / ".github/workflows/season.yml").read_text()
+    timeout = int(re.search(r"timeout-minutes:\s*(\d+)", wf).group(1))
+    assert timeout <= 360, "GitHub's hard ceiling"
+    # Install, state pull and pre-flight before; save and publish after.
+    assert JOB_BUDGET.total_seconds() / 60 + 10 <= timeout
 
 
-@pytest.mark.parametrize("now_hhmm,want", [
-    ((12, 5), (16, 40)),     # before the bell
-    ((13, 30), (16, 40)),    # the open
-    ((16, 39), (16, 40)),    # a minute before handover
-    ((16, 41), (20, 10)),    # just after
-    ((18, 0), (20, 10)),     # a badly delayed run still does the right thing
-])
-def test_auto_window_is_chosen_by_the_clock(now_hhmm, want):
-    """The failure this exists to prevent.
+def test_the_season_job_hands_over_to_the_next_one():
+    """Coverage must not depend on GitHub's best-effort cron."""
+    from pathlib import Path
 
-    Mapping the window to *which cron fired* means a trigger GitHub drops
-    takes its whole window with it. Deriving it from the clock means any run,
-    whenever it starts, stops at the right time.
-    """
-    from competition.cli import HANDOVER_UTC, SESSION_END_UTC
-
-    chosen = HANDOVER_UTC if now_hhmm < HANDOVER_UTC else SESSION_END_UTC
-    assert chosen == want
+    wf = (Path(__file__).resolve().parents[1] / ".github/workflows/season.yml").read_text()
+    assert "gh workflow run" in wf
+    assert "actions: write" in wf

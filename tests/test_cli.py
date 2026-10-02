@@ -101,13 +101,14 @@ def test_draft_can_write_json(tmp_path, capsys):
                 "--json", str(out_json)], tmp_path / "l.sqlite") == 0
     payload = json.loads(out_json.read_text())
     assert payload["target_sum"] == 2505
-    # All nine entries are dealt a hand, including the unscored benchmark --
-    # it needs ten names of its own to be a Round 3 reference line.
-    assert len(payload["hands"]) == 9
+    # The eight scored teams are dealt a hand. The benchmark holds SPY in
+    # Round 3 (its fixed_universe), so a hand would only shrink the pool.
+    assert len(payload["hands"]) == 8
+    assert "benchmark" not in {h["team"] for h in payload["hands"]}
     assert all(sum(h["ranks"]) == 2505 for h in payload["hands"])
     assert all(len(h["symbols"]) == 10 for h in payload["hands"])
     dealt = [s for h in payload["hands"] for s in h["symbols"]]
-    assert len(dealt) == len(set(dealt)) == 90
+    assert len(dealt) == len(set(dealt)) == 80
 
 
 def test_draft_on_a_non_draft_round_is_refused(capsys, tmp_path):

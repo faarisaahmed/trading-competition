@@ -24,23 +24,25 @@ gh workflow run Season             # or just wait for the next schedule
 `push_secrets.sh` reads `.env`, never prints a value, and sets the eight
 secrets the workflow needs.
 
-**How it works.** A session runs 13:30-20:00 UTC, which is longer than the six
-hours a single Actions job may run, so the day is split in two and the baton
-is passed on disk. The engine checkpoints every tick; `comp state pull/push`
-parks the ledger on a branch between jobs. The afternoon job resumes the round
-exactly where the morning job left it.
+**How it works.** The season is a chain of jobs. Each runs for a fixed budget
+(5h30m, under the six-hour job ceiling), saves the ledger, and starts its own
+successor with `gh workflow run`; the successor queues behind it and picks up
+the moment it ends. The engine checkpoints every tick; `comp state pull/push`
+parks the ledger on a branch between jobs, so each job resumes the round
+exactly where the last left it. The chain ends itself once the season is done.
 
 That distinction matters more than it looks: a round that merely runs out of
 wall-clock time is **suspended**, not stopped. Stopping flattens every
 position and scores the round. If the handover used the stop path, every team
-would be liquidated at lunchtime and a half-round scored. They are separate
+would be liquidated mid-session and a partial round scored. They are separate
 code paths, and a test asserts they stay separate.
 
-**What it gives up.** Actions cron is best-effort -- GitHub may delay a
-scheduled run by 10-15 minutes under load. The morning job is therefore
-scheduled 25 minutes before the bell, so an average delay still catches the
-open. A severe delay would cost the first few minutes of a session, equally,
-for every team. If that is unacceptable, use a server instead.
+**Why not cron.** Actions cron is best-effort, and in practice it was far
+worse than "a few minutes late": through Round 1 and the first Round 2 the
+`*/20` schedule fired two or three times a day, the first rarely before 17:00
+UTC, so every session lost its first three to four hours. Cron is still there,
+but only as a backstop to restart a chain that broke (a job cancelled by hand,
+say). To start a chain yourself: `gh workflow run Season`.
 
 Watch it at `https://github.com/faarisaahmed/trading-competition/actions`.
 

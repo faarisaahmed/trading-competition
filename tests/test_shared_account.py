@@ -481,3 +481,51 @@ def test_virtual_book_equity_marks_at_the_current_price(prices):
     book.lot("AAPL").buy(10, 100.0)
     assert book.equity(lambda s: 100.0) == pytest.approx(2000.0)
     assert book.equity(lambda s: 120.0) == pytest.approx(2200.0)
+
+
+# --------------------------------------------------------------------------- #
+# a new round must not inherit the last round's orders
+# --------------------------------------------------------------------------- #
+
+
+def test_last_rounds_orders_are_not_replayed_into_fresh_books(shared):
+    """The bug that scored the first Round 2 on Round 1's trades.
+
+    The real account still lists every order it filled last round, each
+    tagged with its team. After a reset, nothing in the books knows those
+    order ids, so recovering ownership from the tag re-applied them --
+    handing teams positions they never took this round.
+    """
+    buy(shared, "alpha", "AAPL", 1000)
+    buy(shared, "beta", "MSFT", 2000)
+    shared.reset(BANKROLL)              # the next round's opening
+
+    assert not any(shared.poll_fills().values())
+    for team in TEAMS:
+        assert shared.books[team].cash == pytest.approx(BANKROLL)
+        assert shared.books[team].lots == {}
+
+
+def test_an_orphaned_order_from_this_round_is_still_recovered(shared):
+    """Crash recovery from the tag must keep working inside a round."""
+    shared.reset(BANKROLL)
+    buy(shared, "alpha", "AAPL", 1000)
+    held = shared.books["alpha"].qty("AAPL")
+    assert held > 0
+    # Simulate a crash between submit and checkpoint: ownership is lost.
+    shared._owner.clear()
+    shared._applied.clear()
+    shared.books["alpha"] = VirtualBook("alpha", cash=BANKROLL)
+
+    shared.poll_fills()
+    assert shared.books["alpha"].qty("AAPL") == pytest.approx(held)
+
+
+def test_the_round_epoch_survives_a_checkpoint(shared):
+    buy(shared, "alpha", "AAPL", 1000)
+    shared.reset(BANKROLL)
+    fresh = SharedAccount(shared.broker, TEAMS, bankroll=BANKROLL,
+                          price_of=lambda s: 100.0)
+    fresh.load(shared.to_dict())
+    assert not any(fresh.poll_fills().values())
+    assert all(b.lots == {} for b in fresh.books.values())

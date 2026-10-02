@@ -371,3 +371,9 @@ teams:
       cash_buffer_pct: 0.02
     picker_params:
       top_n_by_value: 10
+    # Rounds 2 and 3: hold the S&P 500 itself (via SPY), so the reference
+    # line is "what the market did" rather than a second stock picker.
+    # Round 1 keeps the same three names everyone else trades.
+    fixed_universe:
+      2: [SPY]
+      3: [SPY]

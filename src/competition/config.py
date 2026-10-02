@@ -389,6 +389,10 @@ class TeamConfig:
     philosophy: str = ""
     params: dict[str, Any] = field(default_factory=dict)
     picker_params: dict[str, Any] = field(default_factory=dict)
+    #: round id -> symbols this team trades in that round, bypassing both the
+    #: picker and the draft. For the unscored benchmark, whose job is to be
+    #: "the market", not to pick from it.
+    fixed_universe: dict[int, tuple[str, ...]] = field(default_factory=dict)
 
     def validate(self) -> None:
         if not re.fullmatch(r"[a-z][a-z0-9_]{1,30}", self.key):
@@ -396,6 +400,17 @@ class TeamConfig:
         for spec, label in ((self.strategy, "strategy"), (self.picker, "picker")):
             if ":" not in spec:
                 raise ConfigError(f"team {self.key}: {label} must be 'module.path:ClassName'")
+        if self.scored and self.fixed_universe:
+            # A scored team handed its own symbols would be playing a
+            # different game from the rest of the field.
+            raise ConfigError(f"team {self.key}: only an unscored team may have a fixed_universe")
+        for rid, syms in self.fixed_universe.items():
+            if not syms:
+                raise ConfigError(f"team {self.key}: fixed_universe for round {rid} is empty")
+
+    def fixed_symbols(self, round_id: int) -> tuple[str, ...] | None:
+        """This team's pinned symbols for `round_id`, or None to use the round's rules."""
+        return self.fixed_universe.get(round_id)
 
     def credentials(self) -> tuple[str | None, str | None]:
         """(key_id, secret) from the environment, or (None, None) if unset."""
@@ -443,6 +458,11 @@ class ScheduleConfig:
     #: Sessions left idle between rounds. 0 => round 2 opens the next session
     #: after round 1's final bell.
     gap_sessions: int = 0
+    #: round id -> the earliest day that round may open. Later rounds follow
+    #: on from it as usual. For postponing a round without rewriting the ones
+    #: already played; moving a round *earlier* than the chain allows is an
+    #: error, not a silent overlap.
+    round_starts: dict[int, date] = field(default_factory=dict)
     #: Roll into the next round automatically when one ends.
     auto_advance: bool = True
     publish: PublishConfig = field(default_factory=PublishConfig)
@@ -661,6 +681,10 @@ def _parse_team(raw: dict[str, Any]) -> TeamConfig:
             philosophy=" ".join(str(raw.get("philosophy", "")).split()),
             params=dict(raw.get("params") or {}),
             picker_params=dict(raw.get("picker_params") or {}),
+            fixed_universe={
+                int(rid): tuple(str(x).upper() for x in (syms or []))
+                for rid, syms in (raw.get("fixed_universe") or {}).items()
+            },
         )
     except KeyError as e:
         raise ConfigError(f"team entry missing required field {e}") from e
@@ -683,6 +707,23 @@ def _parse_schedule(raw: Any) -> ScheduleConfig:
         start = start.date()
     elif start is not None and not isinstance(start, date):
         raise ConfigError("competition.schedule.start_date must be a date")
+    starts_raw = raw.get("round_starts") or {}
+    if not isinstance(starts_raw, dict):
+        raise ConfigError("competition.schedule.round_starts must map round id -> date")
+    round_starts: dict[int, date] = {}
+    for rid, when in starts_raw.items():
+        if isinstance(when, datetime):
+            when = when.date()
+        elif isinstance(when, str):
+            try:
+                when = date.fromisoformat(when.strip())
+            except ValueError as e:
+                raise ConfigError(
+                    f"competition.schedule.round_starts.{rid}: {when!r} is not YYYY-MM-DD"
+                ) from e
+        if not isinstance(when, date):
+            raise ConfigError(f"competition.schedule.round_starts.{rid} must be a date")
+        round_starts[int(rid)] = when
     pub = raw.get("publish") or {}
     if not isinstance(pub, dict):
         raise ConfigError("competition.schedule.publish must be a mapping")
@@ -690,6 +731,7 @@ def _parse_schedule(raw: Any) -> ScheduleConfig:
         start_date=start,
         sessions_per_round=int(raw.get("sessions_per_round", 5)),
         gap_sessions=int(raw.get("gap_sessions", 0)),
+        round_starts=round_starts,
         auto_advance=bool(raw.get("auto_advance", True)),
         publish=PublishConfig(
             enabled=bool(pub.get("enabled", False)),

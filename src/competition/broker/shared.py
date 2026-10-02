@@ -263,6 +263,10 @@ class SharedAccount:
         self._applied: dict[str, float] = {}
         #: broker order id -> the intent that produced it
         self._intent: dict[str, OrderIntent] = {}
+        #: When the books were last reset. The real account remembers every
+        #: order it ever filled; one submitted before this belongs to an
+        #: earlier round and must never be attributed to the current books.
+        self._epoch: datetime | None = None
         self.crossed_total = 0.0
         self.wash_rejections = 0
         self.forced_cancels = 0
@@ -602,7 +606,16 @@ class SharedAccount:
                 orders.extend(inner.values())
 
         for order in orders:
-            team = self._owner.get(order.id) or team_from_tag(order.client_order_id)
+            team = self._owner.get(order.id)
+            if team is None:
+                # Recovering ownership from the tag covers an order whose
+                # owner was lost in a crash -- but only within this round.
+                # Without the epoch check, the first poll of Round 2 replayed
+                # the last 200 of Round 1's orders into the fresh books and
+                # scored the round on positions nobody had taken.
+                if self._epoch is not None and order.submitted_at < self._epoch:
+                    continue
+                team = team_from_tag(order.client_order_id)
             if team is None or team not in self.books:
                 continue
             already = self._applied.get(order.id, 0.0)
@@ -659,6 +672,7 @@ class SharedAccount:
         self._owner.clear()
         self._applied.clear()
         self._intent.clear()
+        self._epoch = utcnow()
         for key in self.books:
             self.books[key] = VirtualBook(team_key=key, cash=self.bankroll)
         self.crossed_total = 0.0
@@ -687,6 +701,7 @@ class SharedAccount:
             self._owner.clear()
             self._applied.clear()
             self._intent.clear()
+            self._epoch = utcnow()
             self._flatten_real()
         self._reset_wave.add(team_key)
         self.books[team_key] = VirtualBook(team_key=team_key, cash=float(cash))
@@ -736,6 +751,7 @@ class SharedAccount:
             "books": {k: b.to_dict() for k, b in self.books.items()},
             "owner": dict(self._owner),
             "applied": dict(self._applied),
+            "epoch": self._epoch.isoformat() if self._epoch else None,
         }
 
     def load(self, blob: Mapping) -> None:
@@ -751,6 +767,8 @@ class SharedAccount:
         self._owner = {str(k): str(v) for k, v in (blob.get("owner") or {}).items()}
         self._applied = {str(k): float(v)
                          for k, v in (blob.get("applied") or {}).items()}
+        epoch = blob.get("epoch")
+        self._epoch = datetime.fromisoformat(epoch) if epoch else None
         log.info("%s: restored %d virtual book(s)", self.name, len(self.books))
 
 

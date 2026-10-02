@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 import os
 import random
+import re
 import threading
 import time
 import uuid
@@ -607,6 +608,29 @@ class AlpacaBroker(Broker):
 # --------------------------------------------------------------------------- #
 
 
+_TF_SECONDS = {"Min": 60, "Hour": 3600, "Day": 86400, "Week": 604800, "Month": 2592000}
+
+
+def _lookback_start(timeframe: str, limit: int, end: datetime) -> datetime:
+    """A start far enough back that `limit` bars of `timeframe` exist before `end`.
+
+    Generous on purpose: over-fetching costs a page, under-fetching costs the
+    history a strategy or screen depends on. Intraday bars only exist for
+    6.5 of every 24 hours and 5 of every 7 days, hence the padding.
+    """
+    m = re.match(r"^(\d+)(Min|Hour|Day|Week|Month)$", timeframe)
+    if not m:
+        return end - timedelta(days=30)
+    seconds = int(m.group(1)) * _TF_SECONDS[m.group(2)]
+    limit = max(int(limit), 1)
+    if seconds >= 86400:
+        days = limit * seconds / 86400 * 1.5 + 10    # weekends and holidays
+    else:
+        sessions = limit * seconds / (6.5 * 3600) + 2
+        days = sessions * 1.6 + 4
+    return end - timedelta(days=int(days))
+
+
 class AlpacaDataReader:
     """Market-data access for one client. Used by the single shared data hub."""
 
@@ -625,7 +649,16 @@ class AlpacaDataReader:
         adjustment: str = "split",
         batch: int = 100,
     ) -> dict[str, list[Bar]]:
-        """Multi-symbol bars, oldest first. Batches to stay inside URL limits."""
+        """Multi-symbol bars, oldest first. Batches to stay inside URL limits.
+
+        With no `start`, one is derived from `limit`. Alpaca does NOT read
+        `limit` as "the last N bars": an omitted start defaults to the start
+        of *today*, so a caller asking for 25 daily bars gets one. That
+        silently emptied Round 2's candidate pool (every name failed a
+        five-day history check) and starved every picker of history.
+        """
+        if start is None:
+            start = _lookback_start(timeframe, limit, end or utcnow())
         out: dict[str, list[Bar]] = {s.upper(): [] for s in symbols}
         syms = [s.upper() for s in symbols]
         for i in range(0, len(syms), batch):

@@ -190,8 +190,13 @@ def pull_state(
     if probe.returncode != 0 or not probe.stdout.strip():
         return []                                  # first ever run
 
-    _git("fetch", "--depth", "1", remote, f"{branch}:refs/remotes/{remote}/{branch}",
-         cwd=repo, check=False)
+    # A leading '+' is mandatory: the branch is force-pushed to a fresh orphan
+    # commit every time, so fetching it into an existing ref is always a
+    # non-fast-forward. Without the '+' git refuses, and without `check` we
+    # would silently carry on with whatever stale ref we already had --
+    # restoring an old ledger over a newer one and losing a session's trades.
+    _git("fetch", "--force", "--depth", "1", remote,
+         f"+{branch}:refs/remotes/{remote}/{branch}", cwd=repo)
     listing = _git("ls-tree", "-r", "--name-only", f"{remote}/{branch}", cwd=repo)
     restored = []
     dest = Path(dest)

@@ -106,18 +106,32 @@ class SeasonSchedule:
         sessions_per_round: int,
         calendar: MarketCalendar,
         gap_sessions: int = 0,
+        round_starts: dict[int, date] | None = None,
     ) -> SeasonSchedule:
         """Lay `rounds` end to end, each `sessions_per_round` sessions long.
 
         `first_start` is nudged forward to the next trading day if it lands on
         a weekend or holiday, so "start Monday" survives a Monday holiday
         without silently losing a session.
+
+        `round_starts` postpones individual rounds: round N opens on the later
+        of where the chain would put it and its entry there, and every round
+        after it follows on from that.
         """
         if sessions_per_round < 1:
             raise ValueError("a round needs at least one session")
         windows: list[RoundWindow] = []
         cursor = calendar.next_trading_day(first_start, inclusive=True)
         for rid, name in rounds:
+            pinned = (round_starts or {}).get(rid)
+            if pinned is not None:
+                pinned = calendar.next_trading_day(pinned, inclusive=True)
+                if pinned < cursor:
+                    raise ValueError(
+                        f"round {rid} cannot start {pinned}: the round before it "
+                        f"runs until {cursor}"
+                    )
+                cursor = pinned
             days = _take_sessions(calendar, cursor, sessions_per_round)
             start, end = days[0], days[-1]
             open_times = calendar.session_times(start)

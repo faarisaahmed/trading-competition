@@ -10,6 +10,7 @@
     comp backtest --round 1         full dry run, no keys needed
     comp run --round 1              run live against Alpaca paper accounts
     comp score --round 1            score a completed round
+    comp void-round 2 --reason ...  strike a broken round so it can be re-run
     comp leaderboard                season standings
     comp report                     per-team detail from the ledger
     comp explain-news "headline"    show the sentiment scorer's working
@@ -69,10 +70,13 @@ log = logging.getLogger("competition.cli")
 #: round still in progress. Distinct from success and from failure.
 EXIT_SUSPENDED = 75
 
-#: A session is longer than the six hours one CI job may run, so it is
-#: covered by two. These are the UTC (hour, minute) boundaries.
-HANDOVER_UTC = (16, 40)
-SESSION_END_UTC = (20, 10)
+#: How long one `--until auto` run lasts: under GitHub's six-hour job
+#: ceiling (and the workflow's timeout-minutes) with room to save the ledger.
+#: The workflow chains each job to the next, so coverage comes from the
+#: chain, not from cron -- GitHub fired the scheduled triggers only two or
+#: three times a day in practice, and never before ~17:00 UTC, which cost
+#: every session its first four hours.
+JOB_BUDGET = timedelta(hours=5, minutes=30)
 
 DEFAULT_LEDGER = REPO_ROOT / "runs" / "competition.sqlite"
 DEFAULT_DASHBOARD = REPO_ROOT / "runs" / "dashboard.html"
@@ -1397,6 +1401,7 @@ def _build_schedule(cfg: CompetitionConfig, cal, *, start: date | None = None):
         sessions_per_round=cfg.schedule.sessions_per_round,
         calendar=cal,
         gap_sessions=cfg.schedule.gap_sessions,
+        round_starts=cfg.schedule.round_starts,
     )
 
 
@@ -1500,13 +1505,10 @@ def cmd_season(args, cfg: CompetitionConfig) -> int:
         # and two processes trade the same accounts.
         spec = args.until.strip().lower()
         if spec == "auto":
-            # Pick the window from the clock, not from which trigger fired.
-            # A scheduled run that GitHub delays or drops entirely must still
-            # do the right thing whenever it finally starts.
-            now = utcnow()
-            hh, mm = (HANDOVER_UTC if (now.hour, now.minute) < HANDOVER_UTC
-                      else SESSION_END_UTC)
-            target = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+            # A fixed budget from whenever this run started, not a clock
+            # window: the job that follows picks up from here, so any start
+            # time is the right one.
+            target = utcnow() + JOB_BUDGET
         else:
             try:
                 hh, mm = (int(x) for x in spec.split(":"))
@@ -2054,6 +2056,36 @@ def cmd_score(args, cfg: CompetitionConfig) -> int:
     return 0
 
 
+def cmd_void_round(args, cfg: CompetitionConfig) -> int:
+    """Strike a round's recorded runs so the season can play it again."""
+    if not any(r.id == args.round for r in cfg.rounds):
+        _print(f"ERROR: there is no round {args.round}")
+        return 2
+    ledger = Ledger(args.ledger)
+    try:
+        rows = ledger.query(
+            "SELECT run_id, start_date, end_date, status, ticks FROM round_progress "
+            "WHERE round_id = ? AND status != 'void' ORDER BY started_at",
+            (args.round,),
+        )
+        if not rows:
+            _print(f"round {args.round} has no runs to void in {args.ledger}")
+            return 1
+        _print(f"round {args.round}: voiding {len(rows)} run(s)")
+        for r in rows:
+            _print(f"  {r['run_id']}  {r['start_date'][:10]} .. {r['end_date'][:10]}  "
+                   f"{r['status']:<12} {r['ticks']} ticks")
+        if not args.yes:
+            _print("\ndry run: nothing changed. Re-run with --yes to void.")
+            return 0
+        runs, results = ledger.void_round(args.round, reason=args.reason)
+    finally:
+        ledger.close()
+    _print(f"voided {runs} run(s); {results} result row(s) moved to voided_results.")
+    _print(f"reason: {args.reason}")
+    return 0
+
+
 def cmd_leaderboard(args, cfg: CompetitionConfig) -> int:
     ledger = Ledger(args.ledger)
     scores = _scores_from_ledger(cfg, ledger, [r.id for r in cfg.rounds])
@@ -2327,6 +2359,13 @@ def build_parser() -> argparse.ArgumentParser:
     sc = sub.add_parser("score", help="score recorded round results")
     sc.add_argument("--round", type=int, default=None)
     sc.set_defaults(func=cmd_score)
+
+    vr = sub.add_parser("void-round",
+                        help="strike a round's runs from the standings so it can be re-run")
+    vr.add_argument("round", type=int)
+    vr.add_argument("--reason", required=True, help="recorded in the ledger")
+    vr.add_argument("--yes", action="store_true", help="actually void (default: dry run)")
+    vr.set_defaults(func=cmd_void_round)
 
     lb = sub.add_parser("leaderboard", help="season standings")
     lb.add_argument("--markdown", action="store_true")

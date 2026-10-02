@@ -167,6 +167,23 @@ CREATE TABLE IF NOT EXISTS results (
     PRIMARY KEY (run_id, round_id, team_key)
 );
 
+-- Results struck from the standings by `comp void-round`, kept for the audit.
+CREATE TABLE IF NOT EXISTS voided_results (
+    run_id        TEXT NOT NULL,
+    round_id      INTEGER NOT NULL,
+    team_key      TEXT NOT NULL,
+    start_equity  REAL NOT NULL,
+    end_equity    REAL NOT NULL,
+    return_pct    REAL NOT NULL,
+    place         INTEGER,
+    points        REAL,
+    scored        INTEGER NOT NULL DEFAULT 1,
+    metrics_json  TEXT NOT NULL DEFAULT '{}',
+    voided_at     TEXT NOT NULL,
+    reason        TEXT NOT NULL,
+    PRIMARY KEY (run_id, round_id, team_key)
+);
+
 CREATE TABLE IF NOT EXISTS round_progress (
     round_id    INTEGER NOT NULL,
     run_id      TEXT NOT NULL,
@@ -466,6 +483,46 @@ class Ledger:
                 "UPDATE round_progress SET ticks = ? WHERE round_id = ? AND run_id = ?",
                 (int(ticks), round_id, self.run_id),
             )
+
+    def void_round(self, round_id: int, *, reason: str) -> tuple[int, int]:
+        """Strike every run of `round_id` so far, so the round can be played again.
+
+        The results move to `voided_results` rather than being deleted, and
+        every run's progress row is marked 'void' -- which also stops a later
+        `comp run` from resuming into the dead run. Trades, equity and events
+        are left untouched: they happened, and the audit trail keeps them.
+
+        Returns (runs voided, result rows moved). Unlike the per-tick writes,
+        this raises on failure: a half-voided round is worse than none.
+        """
+        now = _iso(utcnow())
+        with self._tx() as c:
+            runs = c.execute(
+                "SELECT run_id FROM round_progress WHERE round_id = ? AND status != 'void'",
+                (round_id,),
+            ).fetchall()
+            moved = c.execute(
+                "INSERT OR REPLACE INTO voided_results (run_id, round_id, team_key, "
+                "start_equity, end_equity, return_pct, place, points, scored, "
+                "metrics_json, voided_at, reason) "
+                "SELECT run_id, round_id, team_key, start_equity, end_equity, return_pct, "
+                "place, points, scored, metrics_json, ?, ? FROM results WHERE round_id = ?",
+                (now, reason, round_id),
+            ).rowcount
+            c.execute("DELETE FROM results WHERE round_id = ?", (round_id,))
+            c.execute(
+                "UPDATE round_progress SET status = 'void', updated_at = ? "
+                "WHERE round_id = ? AND status != 'void'",
+                (now, round_id),
+            )
+            c.execute(
+                "INSERT INTO events (run_id, team_key, ts, kind, message, data_json) "
+                "VALUES (?, '', ?, 'round_voided', ?, ?)",
+                (self.run_id, now, reason,
+                 _j({"round_id": round_id, "runs": [r[0] for r in runs],
+                     "results": moved})),
+            )
+        return len(runs), max(moved, 0)
 
     def save_checkpoint(self, round_id: int, team_key: str, blob: Mapping[str, Any],
                         *, ticks: int | None = None) -> None:

@@ -125,6 +125,12 @@ competition:
     start_date: 2026-09-21        # Monday
     sessions_per_round: 5         # one market week: Mon -> Fri
     gap_sessions: 0               # round N+1 opens the session after N closes
+    # Postponed rounds: round -> earliest opening day; later rounds follow on.
+    # Round 2 first ran 28 Sep - 2 Oct, but a data bug left every team with
+    # an empty universe all week, so nobody traded. That run is void (see
+    # `comp void-round`) and the round is played again from 5 Oct.
+    round_starts:
+      2: 2026-10-05
     auto_advance: true            # roll into the next round with no human
     publish:
       enabled: true               # push the dashboard to GitHub Pages
