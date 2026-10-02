@@ -197,3 +197,18 @@ def test_void_round_is_a_dry_run_without_yes(tmp_path):
     assert main(["--quiet", "--ledger", str(path), "void-round", "2",
                  "--reason", "x", "--yes"]) == 0
     assert Ledger(path).results_for_round(2) == []
+
+
+def test_a_voided_run_is_never_the_current_run(tmp_path):
+    """Dashboards take runs()[-1]; the struck round must not stay on display."""
+    ledger = Ledger(tmp_path / "l.sqlite", run_id="r1")
+    ledger.start_run(round_id=1, mode="live", broker="alpaca", rules_hash="h", seed=1, config={})
+    _played(ledger, 1, date(2026, 9, 21), scored=True)
+    ledger.run_id = "r2"
+    ledger.start_run(round_id=2, mode="live", broker="alpaca", rules_hash="h", seed=1, config={})
+    _played(ledger, 2, date(2026, 9, 28), scored=True)
+    assert ledger.runs()[-1]["run_id"] == "r2"
+
+    ledger.void_round(2, reason="x")
+    assert [r["run_id"] for r in ledger.runs()] == ["r1"]
+    assert [r["run_id"] for r in ledger.runs(include_void=True)] == ["r1", "r2"]

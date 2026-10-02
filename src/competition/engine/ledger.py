@@ -658,8 +658,21 @@ class Ledger:
             "SELECT * FROM results ORDER BY round_id, place IS NULL, place"
         )
 
-    def runs(self) -> list[sqlite3.Row]:
-        return self.query("SELECT * FROM runs ORDER BY started_at")
+    def runs(self, *, include_void: bool = False) -> list[sqlite3.Row]:
+        """Every run, oldest first -- minus voided ones unless asked.
+
+        Callers take `runs()[-1]` as "the current run" for dashboards and
+        reports; a voided run must never be that, or a struck round keeps
+        appearing as the live leaderboard.
+        """
+        if include_void:
+            return self.query("SELECT * FROM runs ORDER BY started_at")
+        return self.query(
+            "SELECT * FROM runs r WHERE NOT EXISTS ("
+            "  SELECT 1 FROM round_progress p WHERE p.run_id = r.run_id"
+            "  AND p.status = 'void') "
+            "ORDER BY started_at"
+        )
 
     def latest_draft(self, round_id: int) -> dict[str, Any] | None:
         rows = self.query(
