@@ -96,7 +96,7 @@ jobs:
       # The window comes from the clock, not from which trigger fired: a run
       # that GitHub delayed by two hours must still stop at the right time.
       - name: Run the season
-        run: comp season --until "${{ inputs.until || 'auto' }}"
+        run: comp season --until "${{ inputs.until || 'auto' }}" --force
 
       # Even on failure: whatever was learned and traded must not be lost.
       - name: Save the ledger
