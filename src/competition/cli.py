@@ -402,7 +402,11 @@ def cmd_doctor(args, cfg: CompetitionConfig) -> int:
             equity = info["equity"]
             need = target.capital
             tolerance = max(0.01 * need, 5.0)
-            if abs(equity - need) > tolerance:
+            # A shared account is flattened at the bell and each team gets a
+            # fresh virtual book of exactly `starting_cash`, so surplus equity
+            # (last round's paper P&L) is never traded; only a shortfall is.
+            drift = equity - need
+            if (drift < -tolerance) if target.is_group else (abs(drift) > tolerance):
                 flags.append(f"NEEDS ${need:,.2f}")
                 problems.append(
                     f"{target.key} holds ${equity:,.2f} but its "
