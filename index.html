@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>2026 Model Trading Competition</title>
+<style>
+  .viz-root {
+    color-scheme: light;
+    --surface: #fcfcfb;
+    --plane: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --up: #006300;
+    --down: #d03b3b;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --critical: #d03b3b;
+    --team-benchmark: #898781;
+    --team-gambler: #eda100;
+    --team-mean-reverter: #eb6834;
+    --team-news-hound: #008300;
+    --team-q-learner: #1baf7a;
+    --team-scalper: #e34948;
+    --team-stat-arb: #e87ba4;
+    --team-trend-rider: #2a78d6;
+    --team-vol-breakout: #4a3aa7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      color-scheme: dark;
+    --surface: #1a1a19;
+    --plane: #0d0d0d;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255,255,255,0.10);
+    --up: #0ca30c;
+    --down: #d03b3b;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --critical: #d03b3b;
+    --team-benchmark: #898781;
+    --team-gambler: #c98500;
+    --team-mean-reverter: #d95926;
+    --team-news-hound: #008300;
+    --team-q-learner: #199e70;
+    --team-scalper: #e66767;
+    --team-stat-arb: #d55181;
+    --team-trend-rider: #3987e5;
+    --team-vol-breakout: #9085e9;
+    }
+  }
+  :root[data-theme="dark"] .viz-root {
+    color-scheme: dark;
+    --surface: #1a1a19;
+    --plane: #0d0d0d;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255,255,255,0.10);
+    --up: #0ca30c;
+    --down: #d03b3b;
+    --good: #0ca30c;
+    --warning: #fab219;
+    --critical: #d03b3b;
+    --team-benchmark: #898781;
+    --team-gambler: #c98500;
+    --team-mean-reverter: #d95926;
+    --team-news-hound: #008300;
+    --team-q-learner: #199e70;
+    --team-scalper: #e66767;
+    --team-stat-arb: #d55181;
+    --team-trend-rider: #3987e5;
+    --team-vol-breakout: #9085e9;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 22px 26px 60px;
+    background: var(--plane); color: var(--text-primary);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .num { font-variant-numeric: tabular-nums; text-align: right; }
+  h1 { font-size: 19px; margin: 0 0 2px; letter-spacing: -0.01em; }
+  h2 { font-size: 13px; margin: 0 0 12px; font-weight: 600;
+       text-transform: uppercase; letter-spacing: 0.07em;
+       color: var(--text-secondary); }
+  h3 { font-size: 14px; margin: 0; font-weight: 600; }
+  .sub { color: var(--text-secondary); font-size: 12.5px; }
+  .dim { color: var(--muted); }
+  .strong { font-weight: 650; }
+  header.top { display: flex; justify-content: space-between;
+                align-items: flex-end; gap: 20px; margin-bottom: 18px;
+                flex-wrap: wrap; }
+  .up { color: var(--up); }
+  .down { color: var(--down); }
+  .flat { color: var(--muted); }
+
+  .panel { background: var(--surface); border: 1px solid var(--border);
+            border-radius: 10px; padding: 16px 18px; margin-bottom: 16px; }
+
+  .tiles { display: grid; gap: 12px; margin-bottom: 16px;
+            grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); }
+  .tile { background: var(--surface); border: 1px solid var(--border);
+           border-radius: 10px; padding: 13px 15px; }
+  .tile-label { font-size: 11px; text-transform: uppercase;
+                 letter-spacing: 0.07em; color: var(--muted); }
+  .tile-value { font-size: 23px; font-weight: 600; margin-top: 3px;
+                 letter-spacing: -0.02em; }
+  .tile-unit { font-size: 13px; font-weight: 400; color: var(--muted);
+                margin-left: 4px; }
+  .tile-sub { font-size: 12px; color: var(--text-secondary); margin-top: 3px; }
+  .tile-value.live::after { content: ""; display: inline-block; width: 8px;
+    height: 8px; border-radius: 50%; background: var(--good); margin-left: 8px;
+    vertical-align: 3px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+          margin-right: 7px; vertical-align: 2px; background: currentColor; }
+  .status-good { color: var(--good); }
+  .status-warning { color: var(--warning); }
+  .status-critical { color: var(--critical); }
+
+  .chart-wrap { position: relative; }
+  .chart { width: 100%; height: auto; display: block; overflow: visible; }
+  .grid { stroke: var(--grid); stroke-width: 1; }
+  .axis { stroke: var(--axis); stroke-width: 1; }
+  .session-rule { stroke: var(--grid); stroke-width: 1; }
+  .baseline-ref { stroke: var(--axis); stroke-width: 1.5; }
+  .ref-label { fill: var(--muted); font-size: 10.5px; }
+  .tick { fill: var(--muted); font-size: 10.5px;
+           font-variant-numeric: tabular-nums; }
+  .tick.y { text-anchor: end; }
+  .tick.x { text-anchor: middle; }
+  .line { fill: none; stroke-width: 2; stroke-linejoin: round;
+           stroke-linecap: round; }
+  .line.benchmark { stroke-width: 1.5; opacity: 0.85; }
+  .end-dot { stroke: var(--surface); stroke-width: 2; }
+  .series-label { font-size: 11px; fill: var(--text-secondary); }
+  .label-swatch { stroke: var(--surface); stroke-width: 1; }
+  .crosshair { stroke: var(--axis); stroke-width: 1; pointer-events: none; }
+  .axis-note { font-size: 11.5px; color: var(--muted); margin: 6px 0 0;
+                max-width: 76ch; }
+  .tooltip { position: absolute; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px;
+    font-size: 12px; pointer-events: none; min-width: 264px;
+    box-shadow: 0 6px 22px rgba(0,0,0,0.13); z-index: 5; }
+  .tip-head { color: var(--muted); font-size: 11px; margin-bottom: 6px;
+               font-variant-numeric: tabular-nums; }
+  .tip-row { display: flex; align-items: center; gap: 7px;
+              line-height: 1.75; }
+  .tip-name { flex: 1; color: var(--text-secondary); white-space: nowrap; }
+  .tip-val, .tip-ret { font-variant-numeric: tabular-nums; }
+  .tip-ret { min-width: 58px; text-align: right; }
+
+  table.data { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.data th { text-align: left; font-weight: 600; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+    padding: 0 10px 8px; border-bottom: 1px solid var(--border);
+    white-space: nowrap; }
+  table.data th.num { text-align: right; }
+  table.data td { padding: 7px 10px; border-bottom: 1px solid var(--border); }
+  table.data tbody tr:last-child td { border-bottom: none; }
+  table.data tr.unscored { color: var(--text-secondary); }
+  table.tape td { padding: 5px 10px; font-size: 12.5px; }
+  .reason { max-width: 44ch; overflow: hidden; text-overflow: ellipsis;
+             white-space: nowrap; }
+  .side-buy { color: var(--up); font-weight: 600; }
+  .side-sell { color: var(--down); font-weight: 600; }
+
+  .swatch { display: inline-block; width: 10px; height: 10px;
+             border-radius: 3px; margin-right: 8px; vertical-align: 0; }
+  .swatch.sm { width: 8px; height: 8px; margin-right: 6px; }
+  .badge { font-size: 10.5px; padding: 1px 6px; border-radius: 20px;
+            margin-left: 8px; border: 1px solid currentColor; }
+  .badge.critical { color: var(--critical); }
+  .badge.warning { color: var(--warning); }
+
+  .cards { display: grid; gap: 12px; margin-bottom: 16px;
+            grid-template-columns: repeat(auto-fit, minmax(292px, 1fr)); }
+  .card { background: var(--surface); border: 1px solid var(--border);
+           border-radius: 10px; padding: 13px 15px; }
+  .card header { display: flex; align-items: center; gap: 2px;
+                  margin-bottom: 9px; }
+  .card-ret { margin-left: auto; font-variant-numeric: tabular-nums;
+               font-weight: 600; }
+  .card dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px;
+              margin: 0; font-size: 12.5px; }
+  .card dt { color: var(--muted); white-space: nowrap; }
+  .card dd { margin: 0; overflow-wrap: anywhere; }
+  .banner { background: var(--surface); border: 1px solid var(--warning);
+             border-left: 4px solid var(--warning); border-radius: 8px;
+             padding: 11px 15px; margin-bottom: 16px; font-size: 13px;
+             color: var(--text-secondary); }
+  .banner strong { color: var(--text-primary); }
+  .empty { color: var(--muted); padding: 34px 0; text-align: center; }
+  footer { color: var(--muted); font-size: 11.5px; margin-top: 22px;
+            display: flex; gap: 16px; flex-wrap: wrap; }
+
+  .banner.quiet { border-color: var(--border); }
+
+  /* ---- hero ---------------------------------------------------------- */
+  .hero {
+    display: flex; justify-content: space-between; align-items: center;
+    gap: 24px; flex-wrap: wrap; padding: 20px 24px; margin-bottom: 16px;
+    border-radius: 14px; border: 1px solid var(--border);
+    background: linear-gradient(135deg, var(--surface), var(--plane));
+  }
+  .hero-title {
+    font-size: 26px; font-weight: 700; letter-spacing: -.01em;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  }
+  .badge {
+    font-size: 11px; font-weight: 600; letter-spacing: .1em;
+    text-transform: uppercase; padding: 4px 10px; border-radius: 999px;
+    border: 1px solid var(--border); color: var(--text-secondary);
+  }
+  .badge.live {
+    border-color: var(--good); color: var(--good);
+    display: inline-flex; align-items: center; gap: 7px;
+  }
+  .badge .dot {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--good);
+    animation: pulse 1.8s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: .35; transform: scale(.78); }
+  }
+  .hero-round { margin-top: 12px; max-width: 420px; }
+  .hero-round-name { font-size: 13px; color: var(--text-secondary); }
+  .hero-round-sub { font-size: 11px; color: var(--muted); margin-top: 5px; }
+  .progress {
+    height: 6px; border-radius: 99px; background: var(--grid);
+    margin-top: 8px; overflow: hidden;
+  }
+  .progress span {
+    display: block; height: 100%; border-radius: 99px;
+    background: var(--good); transition: width .8s ease;
+  }
+  .hero-clock { text-align: right; }
+  .hero-clock-label {
+    font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--text-secondary);
+  }
+  .hero-clock-value {
+    font-size: 42px; font-weight: 700; line-height: 1.1;
+    font-variant-numeric: tabular-nums; color: var(--text-primary);
+  }
+  .hero-clock-when { font-size: 11px; color: var(--muted); }
+
+  /* ---- tabs ---------------------------------------------------------- */
+  .tabs {
+    display: flex; gap: 4px; margin-bottom: 18px; flex-wrap: wrap;
+    border-bottom: 1px solid var(--border);
+  }
+  .tab {
+    appearance: none; background: none; border: 0; cursor: pointer;
+    font: inherit; font-size: 13px; font-weight: 600; letter-spacing: .01em;
+    color: var(--text-secondary); padding: 10px 16px;
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .tab:hover { color: var(--text-primary); }
+  .tab.on { color: var(--text-primary); border-bottom-color: var(--good); }
+  .panel-set.hidden { display: none; }
+
+  /* ---- podium -------------------------------------------------------- */
+  .podium {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+    align-items: end; margin-bottom: 18px;
+  }
+  .step { text-align: center; }
+  .step-team {
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    font-weight: 600; font-size: 15px;
+  }
+  .step-ret {
+    font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums;
+    margin: 2px 0;
+  }
+  .step-eq {
+    font-size: 12px; color: var(--muted); margin-bottom: 8px;
+    font-variant-numeric: tabular-nums;
+  }
+  .block {
+    border-radius: 10px 10px 0 0; display: flex; align-items: flex-start;
+    justify-content: center; padding-top: 10px;
+    border: 1px solid var(--border); border-bottom: 0;
+    width: min(100%, 230px); margin: 0 auto;
+  }
+  .h1 .block { height: 104px; }
+  .h2 .block { height: 74px; }
+  .h3 .block { height: 54px; }
+  .block .place {
+    font-size: 12px; font-weight: 700; letter-spacing: .09em;
+    text-transform: uppercase; color: #12151a;
+  }
+  .block.gold { background: #e8b53a; border-color: #e8b53a; }
+  .block.silver { background: #b9c0c9; border-color: #b9c0c9; }
+  .block.bronze { background: #c98a5e; border-color: #c98a5e; }
+
+  /* ---- the race ------------------------------------------------------ */
+  .race { display: flex; flex-direction: column; gap: 3px; }
+  .race-axis {
+    display: flex; justify-content: space-between; font-size: 10px;
+    letter-spacing: .09em; text-transform: uppercase; color: var(--muted);
+    padding: 0 0 6px;
+  }
+  .race-row {
+    display: grid; align-items: center; gap: 12px;
+    grid-template-columns: 26px minmax(150px, 210px) 1fr 78px 96px;
+    padding: 5px 0; border-bottom: 1px solid var(--grid);
+  }
+  .race-place { color: var(--muted); font-size: 12px; text-align: right; }
+  .race-name {
+    display: flex; align-items: center; gap: 8px; font-weight: 600;
+    font-size: 13px; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .race-name em {
+    color: var(--muted); font-weight: 400; font-size: 10px;
+    letter-spacing: .06em; text-transform: uppercase; margin-left: 2px;
+  }
+  .race-track {
+    position: relative; height: 16px; background: var(--grid);
+    border-radius: 4px;
+  }
+  /* Zero sits in the middle: bars grow right for gains, left for losses. */
+  .race-track::before {
+    content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px;
+    width: 1px; background: var(--axis);
+  }
+  .race-bar {
+    position: absolute; top: 0; height: 100%; border-radius: 4px;
+    transition: width .9s cubic-bezier(.22, 1, .36, 1);
+  }
+  .race-bar.pos { left: 50%; background: var(--up); }
+  .race-bar.neg { right: 50%; background: var(--down); }
+  .race-ret, .race-eq { text-align: right; font-size: 13px; }
+  .race-eq { color: var(--text-secondary); }
+  .medal {
+    width: 9px; height: 9px; border-radius: 50%; display: inline-block;
+    flex: 0 0 auto;
+  }
+  .medal.gold { background: #e8b53a; }
+  .medal.silver { background: #b9c0c9; }
+  .medal.bronze { background: #c98a5e; }
+
+  /* ---- dossiers ------------------------------------------------------ */
+  .dossiers {
+    display: grid; gap: 14px;
+    grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  }
+  .dossier {
+    border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px;
+    background: var(--surface);
+  }
+  .dossier header {
+    display: flex; align-items: center; gap: 9px; margin-bottom: 10px;
+  }
+  .dossier h3 { margin: 0; font-size: 15px; }
+  .dossier-rank {
+    font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums;
+  }
+  .dossier-ret {
+    margin-left: auto; font-size: 17px; font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .tagline {
+    margin: 0 0 8px; font-style: italic; font-size: 13px;
+    color: var(--text-primary);
+  }
+  .philosophy {
+    margin: 0 0 12px; font-size: 12px; line-height: 1.55;
+    color: var(--text-secondary);
+  }
+  .dossier-stats {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px;
+    margin: 0 0 10px;
+  }
+  .dossier-stats dt {
+    font-size: 10px; letter-spacing: .07em; text-transform: uppercase;
+    color: var(--muted);
+  }
+  .dossier-stats dd { margin: 2px 0 0; font-size: 13px; font-weight: 600; }
+  .dossier-holdings {
+    font-size: 11px; color: var(--text-secondary); padding-top: 7px;
+    border-top: 1px solid var(--grid);
+  }
+  .dossier-holdings span {
+    color: var(--muted); text-transform: uppercase; letter-spacing: .07em;
+    margin-right: 6px; font-size: 10px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .race-bar, .progress span { transition: none; }
+    .badge .dot { animation: none; }
+  }
+
+  @media (max-width: 720px) {
+    .race-row { grid-template-columns: 22px 1fr 70px; }
+    .race-track, .race-eq { display: none; }
+    .hero-clock { text-align: left; }
+    .hero-clock-value { font-size: 32px; }
+  }
+  .clock {
+    display: flex; align-items: baseline; gap: 20px; flex-wrap: wrap;
+    padding: 14px 18px; margin: 0 0 18px; border-radius: 10px;
+    background: var(--surface); border: 1px solid var(--border);
+  }
+  .clock.live { border-color: var(--good); }
+  .clock-label {
+    font-size: 11px; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--text-secondary);
+  }
+  .clock-value {
+    font-size: 30px; font-weight: 600; font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+  }
+  .clock.live .clock-value { color: var(--good); }
+  .clock-when { font-size: 12px; color: var(--muted); }
+  .clock.done .clock-label { color: var(--text-primary); font-size: 16px; }
+  table.plan { width: 100%; border-collapse: collapse; }
+  table.plan th {
+    text-align: left; font-size: 11px; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--text-secondary);
+    padding: 6px 10px; border-bottom: 1px solid var(--border);
+  }
+  table.plan td { padding: 8px 10px; border-bottom: 1px solid var(--grid); }
+  table.plan tr.done td { color: var(--muted); }
+  .pill {
+    display: inline-block; padding: 2px 9px; border-radius: 999px;
+    font-size: 11px; letter-spacing: .04em; border: 1px solid var(--border);
+    color: var(--text-secondary);
+  }
+  .pill.live { border-color: var(--good); color: var(--good); }
+  .pill.done { color: var(--muted); }
+</style>
+</head>
+<body class="viz-root" data-palette="#2a78d6,#eb6834,#1baf7a,#eda100,#e87ba4,#008300,#4a3aa7,#e34948">
+
+<section class="hero">
+  <div class="hero-left">
+    <div class="hero-title">2026 Model Trading Competition <span class="badge">between rounds</span></div>
+    
+  </div>
+  <div class="hero-clock"><div class="hero-clock-label">Next round starts in</div><div class="hero-clock-value num" data-deadline="2026-10-12T13:30:00+00:00">&mdash;</div><div class="hero-clock-when">Mon 12 Oct 13:30 UTC</div></div>
+</section>
+
+
+<nav class="tabs" role="tablist"><button class="tab on" data-tab="leaderboard">Leaderboard</button><button class="tab" data-tab="teams">The Field</button><button class="tab" data-tab="season">Season</button><button class="tab" data-tab="activity">Activity</button></nav>
+
+<section class="panel-set" id="tab-leaderboard">
+  <section class="podium"><div class="step h2"><div class="step-team"><span class="swatch" style="background:var(--team-trend-rider)"></span><span class="step-name">Trend Rider</span></div><div class="step-ret up">+2.92%</div><div class="step-eq">$5,145.92</div><div class="block silver"><span class="place">2nd</span></div></div><div class="step h1"><div class="step-team"><span class="swatch" style="background:var(--team-q-learner)"></span><span class="step-name">Q-Learner</span></div><div class="step-ret up">+4.16%</div><div class="step-eq">$5,208.16</div><div class="block gold"><span class="place">1st</span></div></div><div class="step h3"><div class="step-team"><span class="swatch" style="background:var(--team-vol-breakout)"></span><span class="step-name">Vol Breakout</span></div><div class="step-ret up">+0.25%</div><div class="step-eq">$5,012.31</div><div class="block bronze"><span class="place">3rd</span></div></div></section>
+  <section class="tiles"><div class="tile"><div class="tile-label">Market</div><div class="tile-value ">closed</div><div class="tile-sub">market closed</div></div><div class="tile"><div class="tile-label">Leading</div><div class="tile-value">Q-Learner</div><div class="tile-sub up">+4.16% · $5,208.16</div></div><div class="tile"><div class="tile-label">Field spread</div><div class="tile-value">7.54<span class="tile-unit">pp</span></div><div class="tile-sub">first to last</div></div><div class="tile"><div class="tile-label">Beating the benchmark</div><div class="tile-value">2<span class="tile-unit">/ 8</span></div><div class="tile-sub up">benchmark +1.00%</div></div><div class="tile"><div class="tile-label">Engine</div><div class="tile-value status-good"><span class="dot"></span>healthy</div><div class="tile-sub">0 ticks</div></div></section>
+  <section class="panel">
+    <h2>Standings</h2>
+    <div class="race"><div class="race-axis"><span>behind</span><span>ahead</span></div><div class="race-row"><div class="race-place num">1</div><div class="race-name"><span class="medal gold"></span><span class="swatch" style="background:var(--team-q-learner)"></span>Q-Learner</div><div class="race-track"><div class="race-bar pos" style="width:50.00%"></div></div><div class="race-ret num up">+4.16%</div><div class="race-eq num">$5,208.16</div></div><div class="race-row"><div class="race-place num">2</div><div class="race-name"><span class="medal silver"></span><span class="swatch" style="background:var(--team-trend-rider)"></span>Trend Rider</div><div class="race-track"><div class="race-bar pos" style="width:35.05%"></div></div><div class="race-ret num up">+2.92%</div><div class="race-eq num">$5,145.92</div></div><div class="race-row"><div class="race-place num">3</div><div class="race-name"><span class="medal bronze"></span><span class="swatch" style="background:var(--team-vol-breakout)"></span>Vol Breakout</div><div class="race-track"><div class="race-bar pos" style="width:2.96%"></div></div><div class="race-ret num up">+0.25%</div><div class="race-eq num">$5,012.31</div></div><div class="race-row"><div class="race-place num">4</div><div class="race-name"><span class="swatch" style="background:var(--team-stat-arb)"></span>Stat Arb</div><div class="race-track"><div class="race-bar neg" style="width:5.31%"></div></div><div class="race-ret num down">-0.44%</div><div class="race-eq num">$4,977.89</div></div><div class="race-row"><div class="race-place num">5</div><div class="race-name"><span class="swatch" style="background:var(--team-mean-reverter)"></span>Mean Reverter</div><div class="race-track"><div class="race-bar neg" style="width:9.05%"></div></div><div class="race-ret num down">-0.75%</div><div class="race-eq num">$4,962.31</div></div><div class="race-row"><div class="race-place num">6</div><div class="race-name"><span class="swatch" style="background:var(--team-scalper)"></span>The Scalper</div><div class="race-track"><div class="race-bar neg" style="width:23.68%"></div></div><div class="race-ret num down">-1.97%</div><div class="race-eq num">$4,901.41</div></div><div class="race-row"><div class="race-place num">7</div><div class="race-name"><span class="swatch" style="background:var(--team-gambler)"></span>The Gambler</div><div class="race-track"><div class="race-bar neg" style="width:30.08%"></div></div><div class="race-ret num down">-2.50%</div><div class="race-eq num">$4,874.78</div></div><div class="race-row"><div class="race-place num">8</div><div class="race-name"><span class="swatch" style="background:var(--team-news-hound)"></span>News Hound</div><div class="race-track"><div class="race-bar neg" style="width:40.58%"></div></div><div class="race-ret num down">-3.38%</div><div class="race-eq num">$4,831.06</div></div><div class="race-row"><div class="race-place num">&mdash;</div><div class="race-name"><span class="swatch" style="background:var(--team-benchmark)"></span>Buy &amp; Hold (benchmark)</div><div class="race-track"><div class="race-bar pos" style="width:11.98%"></div></div><div class="race-ret num up">+1.00%</div><div class="race-eq num">$5,049.86</div></div></div>
+  </section>
+  <section class="panel">
+    <h2>Equity this round</h2>
+    <div class="chart-wrap"><svg class="chart" viewBox="0 0 1080 380" role="img" aria-label="Equity curve for every team this round" preserveAspectRatio="xMidYMid meet"><line class="grid" x1="68" y1="342.0" x2="930" y2="342.0"/><text class="tick y" x="58" y="346.0">$4,099</text><line class="grid" x1="68" y1="277.2" x2="930" y2="277.2"/><text class="tick y" x="58" y="281.2">$4,374</text><line class="grid" x1="68" y1="212.4" x2="930" y2="212.4"/><text class="tick y" x="58" y="216.4">$4,648</text><line class="grid" x1="68" y1="147.6" x2="930" y2="147.6"/><text class="tick y" x="58" y="151.6">$4,923</text><line class="grid" x1="68" y1="82.8" x2="930" y2="82.8"/><text class="tick y" x="58" y="86.8">$5,198</text><line class="grid" x1="68" y1="18.0" x2="930" y2="18.0"/><text class="tick y" x="58" y="22.0">$5,472</text><line class="baseline-ref" x1="68" y1="129.4" x2="930" y2="129.4"/><text class="tick x" x="68.0" y="362">10-05</text><line class="session-rule" x1="110.3" y1="18" x2="110.3" y2="342"/><text class="tick x" x="110.3" y="362">10-06</text><line class="session-rule" x1="428.8" y1="18" x2="428.8" y2="342"/><text class="tick x" x="428.8" y="362">10-07</text><line class="session-rule" x1="705.0" y1="18" x2="705.0" y2="342"/><text class="tick x" x="705.0" y="362">10-08</text><line class="session-rule" x1="754.0" y1="18" x2="754.0" y2="342"/><text class="tick x" x="754.0" y="362">10-09</text><line class="axis" x1="68" y1="342" x2="930" y2="342"/><polyline class="line benchmark" points="68.0,129.4 70.2,129.7 72.5,129.5 74.7,130.0 76.9,129.7 79.1,129.7 81.4,129.4 83.6,128.6 85.8,127.6 88.0,127.0 90.3,126.5 92.5,126.7 94.7,127.8 97.0,127.2 99.2,127.3 101.4,127.1 103.6,123.5 105.9,123.5 108.1,123.5 110.3,123.5 112.5,123.5 114.8,123.5 117.0,123.5 119.2,123.5 121.5,123.5 123.7,123.5 125.9,123.5 128.1,123.5 130.4,123.5 132.6,123.5 134.8,123.5 137.0,123.5 139.3,123.5 141.5,123.5 143.7,123.5 146.0,123.5 148.2,123.5 150.4,123.5 152.6,123.5 154.9,123.5 157.1,123.5 159.3,123.5 161.6,123.5 163.8,123.5 166.0,123.5 168.2,123.5 170.5,123.5 172.7,123.5 174.9,123.5 177.1,123.5 179.4,123.5 181.6,123.5 183.8,123.5 186.1,123.5 188.3,123.5 190.5,123.5 192.7,123.5 195.0,123.5 197.2,123.5 199.4,123.5 201.6,123.5 203.9,123.5 206.1,123.5 208.3,123.5 210.6,123.5 212.8,123.5 215.0,123.5 217.2,118.1 219.5,119.0 221.7,119.4 223.9,119.4 226.1,119.4 228.4,118.3 230.6,118.3 232.8,118.1 235.1,117.4 237.3,117.0 239.5,116.6 241.7,115.5 244.0,116.1 246.2,115.3 248.4,115.3 250.6,116.2 252.9,116.8 255.1,117.4 257.3,116.6 259.6,115.5 261.8,116.2 264.0,115.4 266.2,115.3 268.5,114.8 270.7,114.7 272.9,114.2 275.1,113.6 277.4,113.6 279.6,113.7 281.8,113.8 284.1,113.6 286.3,114.0 288.5,113.8 290.7,114.2 293.0,113.9 295.2,114.0 297.4,114.4 299.6,114.6 301.9,114.7 304.1,114.6 306.3,115.2 308.6,115.2 310.8,115.5 313.0,115.2 315.2,115.2 317.5,115.6 319.7,116.0 321.9,115.9 324.1,116.2 326.4,116.7 328.6,117.0 330.8,116.2 333.1,116.1 335.3,115.9 337.5,115.9 339.7,115.8 342.0,115.8 344.2,116.0 346.4,115.6 348.7,115.3 350.9,115.4 353.1,115.8 355.3,115.9 357.6,116.0 359.8,116.2 362.0,115.9 364.2,115.6 366.5,115.6 368.7,115.5 370.9,115.5 373.2,115.9 375.4,115.9 377.6,116.1 379.8,116.2 382.1,116.1 384.3,116.2 386.5,116.2 388.7,116.5 391.0,116.6 393.2,117.0 395.4,116.7 397.7,116.7 399.9,116.7 402.1,116.7 404.3,116.7 406.6,116.7 408.8,116.7 411.0,116.7 413.2,116.7 415.5,116.7 417.7,116.7 419.9,116.7 422.2,116.7 424.4,116.7 426.6,116.7 428.8,116.7 431.1,116.7 433.3,116.7 435.5,116.7 437.7,116.7 440.0,116.7 442.2,116.7 444.4,116.7 446.7,116.7 448.9,116.7 451.1,116.7 453.3,116.7 455.6,116.7 457.8,116.7 460.0,116.7 462.2,116.7 464.5,116.7 466.7,116.7 468.9,116.7 471.2,116.7 473.4,116.7 475.6,116.7 477.8,116.7 480.1,116.7 482.3,116.7 484.5,116.7 486.7,116.7 489.0,116.7 491.2,116.7 493.4,116.7 495.7,116.7 497.9,116.7 500.1,116.7 502.3,116.7 504.6,116.7 506.8,116.7 509.0,116.7 511.3,116.7 513.5,116.7 515.7,116.7 517.9,116.7 520.2,116.7 522.4,116.7 524.6,116.7 526.8,116.7 529.1,116.7 531.3,116.7 533.5,116.7 535.8,121.3 538.0,122.2 540.2,121.4 542.4,121.5 544.7,121.5 546.9,121.7 549.1,122.0 551.3,123.1 553.6,123.7 555.8,124.5 558.0,123.2 560.3,123.8 562.5,123.7 564.7,124.3 566.9,124.5 569.2,123.2 571.4,123.9 573.6,124.0 575.8,123.8 578.1,123.9 580.3,124.7 582.5,125.1 584.8,124.4 587.0,124.7 589.2,124.2 591.4,123.1 593.7,123.5 595.9,123.7 598.1,123.5 600.3,123.2 602.6,122.0 604.8,121.6 607.0,120.9 609.3,121.2 611.5,120.9 613.7,120.9 615.9,120.9 618.2,120.9 620.4,120.5 622.6,120.6 624.8,120.5 627.1,120.9 629.3,121.1 631.5,121.0 633.8,121.2 636.0,121.3 638.2,120.5 640.4,119.9 642.7,120.0 644.9,119.5 647.1,119.4 649.3,119.6 651.6,119.7 653.8,119.8 656.0,119.3 658.3,119.8 660.5,119.9 662.7,120.0 664.9,119.4 667.2,119.6 669.4,119.7 671.6,119.6 673.9,119.3 676.1,119.3 678.3,120.0 680.5,119.6 682.8,119.6 685.0,119.4 687.2,119.3 689.4,119.8 691.7,119.6 693.9,120.1 696.1,120.2 698.4,119.9 700.6,120.1 702.8,120.2 705.0,119.8 707.3,119.8 709.5,119.8 711.7,119.8 713.9,119.8 716.2,119.8 718.4,119.8 720.6,119.8 722.9,119.8 725.1,119.8 727.3,119.8 729.5,119.8 731.8,119.8 734.0,119.8 736.2,119.8 738.4,119.8 740.7,119.8 742.9,119.8 745.1,119.8 747.4,119.8 749.6,119.8 751.8,119.8 754.0,120.4 756.3,120.6 758.5,121.0 760.7,121.0 762.9,120.7 765.2,121.9 767.4,120.7 769.6,121.0 771.9,122.4 774.1,121.8 776.3,121.9 778.5,121.8 780.8,121.8 783.0,121.9 785.2,121.0 787.4,121.2 789.7,120.8 791.9,121.2 794.1,121.1 796.4,121.6 798.6,121.0 800.8,120.1 803.0,119.4 805.3,119.6 807.5,120.6 809.7,119.9 811.9,119.1 814.2,119.4 816.4,120.0 818.6,120.3 820.9,120.1 823.1,120.4 825.3,119.6 827.5,119.6 829.8,120.3 832.0,119.2 834.2,119.5 836.4,118.9 838.7,119.0 840.9,118.8 843.1,118.5 845.4,118.6 847.6,118.9 849.8,118.4 852.0,118.0 854.3,118.3 856.5,118.3 858.7,118.4 861.0,118.6 863.2,119.0 865.4,118.9 867.6,118.5 869.9,118.9 872.1,118.6 874.3,118.5 876.5,118.4 878.8,118.2 881.0,118.2 883.2,118.4 885.5,117.8 887.7,117.9 889.9,117.7 892.1,117.7 894.4,117.8 896.6,117.8 898.8,117.8 901.0,117.5 903.3,117.3 905.5,117.6 907.7,117.2 910.0,117.1 912.2,117.2 914.4,117.2 916.6,117.0 918.9,117.3 921.1,117.3 923.3,117.4 925.5,117.8 927.8,117.7 930.0,117.7" stroke="var(--team-benchmark)"/><circle class="end-dot" cx="930.0" cy="117.7" r="4.5" fill="var(--team-benchmark)"/><polyline class="line" points="68.0,129.4 70.2,127.6 72.5,130.5 74.7,130.5 76.9,129.6 79.1,128.6 81.4,127.7 83.6,127.9 85.8,125.4 88.0,127.3 90.3,126.2 92.5,127.1 94.7,131.6 97.0,128.7 99.2,128.4 101.4,127.0 103.6,126.9 105.9,126.9 108.1,126.9 110.3,126.9 112.5,126.9 114.8,126.9 117.0,126.9 119.2,126.9 121.5,126.9 123.7,126.9 125.9,126.9 128.1,126.9 130.4,126.9 132.6,126.9 134.8,126.9 137.0,126.9 139.3,126.9 141.5,126.9 143.7,126.9 146.0,126.9 148.2,126.9 150.4,126.9 152.6,126.9 154.9,126.9 157.1,126.9 159.3,126.9 161.6,126.9 163.8,126.9 166.0,126.9 168.2,126.9 170.5,126.9 172.7,126.9 174.9,126.9 177.1,126.9 179.4,126.9 181.6,126.9 183.8,126.9 186.1,126.9 188.3,126.9 190.5,126.9 192.7,126.9 195.0,126.9 197.2,126.9 199.4,126.9 201.6,126.9 203.9,126.9 206.1,126.9 208.3,126.9 210.6,126.9 212.8,126.9 215.0,126.9 217.2,126.9 219.5,126.9 221.7,126.9 223.9,126.9 226.1,126.9 228.4,126.9 230.6,133.7 232.8,132.3 235.1,126.1 237.3,125.8 239.5,128.7 241.7,127.6 244.0,130.3 246.2,126.7 248.4,127.1 250.6,131.1 252.9,132.0 255.1,132.1 257.3,130.7 259.6,128.5 261.8,129.6 264.0,129.4 266.2,127.6 268.5,127.2 270.7,126.6 272.9,127.6 275.1,128.1 277.4,129.8 279.6,129.1 281.8,129.1 284.1,131.6 286.3,132.5 288.5,132.5 290.7,132.8 293.0,133.1 295.2,124.1 297.4,123.9 299.6,135.3 301.9,136.4 304.1,137.2 306.3,136.8 308.6,137.5 310.8,137.4 313.0,136.4 315.2,137.2 317.5,138.1 319.7,138.8 321.9,136.9 324.1,138.0 326.4,133.0 328.6,140.5 330.8,139.6 333.1,139.9 335.3,137.7 337.5,131.4 339.7,131.3 342.0,137.4 344.2,137.0 346.4,136.8 348.7,137.3 350.9,137.2 353.1,136.9 355.3,138.4 357.6,137.5 359.8,137.8 362.0,137.9 364.2,137.8 366.5,138.2 368.7,137.9 370.9,138.3 373.2,139.5 375.4,139.2 377.6,139.9 379.8,140.5 382.1,140.5 384.3,140.2 386.5,140.4 388.7,140.6 391.0,140.5 393.2,140.7 395.4,143.0 397.7,143.0 399.9,143.0 402.1,147.5 404.3,147.5 406.6,147.5 408.8,147.5 411.0,147.5 413.2,147.5 415.5,147.5 417.7,147.5 419.9,147.5 422.2,147.5 424.4,147.5 426.6,147.5 428.8,147.5 431.1,147.5 433.3,147.5 435.5,147.5 437.7,147.5 440.0,147.5 442.2,147.5 444.4,147.5 446.7,147.5 448.9,147.5 451.1,147.5 453.3,147.5 455.6,147.5 457.8,147.5 460.0,147.5 462.2,147.5 464.5,147.5 466.7,147.5 468.9,147.5 471.2,147.5 473.4,147.5 475.6,147.5 477.8,147.5 480.1,147.5 482.3,147.5 484.5,147.5 486.7,147.5 489.0,147.5 491.2,147.5 493.4,147.5 495.7,147.5 497.9,147.5 500.1,147.5 502.3,147.5 504.6,147.5 506.8,147.5 509.0,147.5 511.3,147.5 513.5,147.5 515.7,147.5 517.9,147.5 520.2,147.5 522.4,147.5 524.6,147.5 526.8,147.5 529.1,147.5 531.3,147.5 533.5,147.5 535.8,147.6 538.0,147.6 540.2,147.6 542.4,147.6 544.7,147.6 546.9,144.2 549.1,146.7 551.3,147.4 553.6,146.9 555.8,143.6 558.0,144.1 560.3,144.3 562.5,145.2 564.7,142.7 566.9,152.5 569.2,149.9 571.4,150.2 573.6,146.1 575.8,149.7 578.1,152.1 580.3,151.6 582.5,151.5 584.8,151.3 587.0,152.2 589.2,152.5 591.4,152.0 593.7,153.6 595.9,153.3 598.1,153.3 600.3,152.2 602.6,151.9 604.8,151.4 607.0,151.9 609.3,151.4 611.5,146.6 613.7,152.3 615.9,150.5 618.2,152.2 620.4,152.2 622.6,152.3 624.8,152.0 627.1,152.1 629.3,151.9 631.5,151.3 633.8,144.5 636.0,151.1 638.2,152.0 640.4,153.4 642.7,152.6 644.9,146.3 647.1,146.4 649.3,154.8 651.6,153.7 653.8,146.3 656.0,153.6 658.3,154.0 660.5,153.9 662.7,146.7 664.9,153.8 667.2,160.5 669.4,146.9 671.6,153.5 673.9,153.5 676.1,145.6 678.3,154.1 680.5,153.5 682.8,153.7 685.0,153.5 687.2,145.9 689.4,153.3 691.7,153.5 693.9,153.4 696.1,145.7 698.4,152.5 700.6,145.9 702.8,153.5 705.0,152.9 707.3,152.9 709.5,152.9 711.7,152.9 713.9,152.9 716.2,152.9 718.4,152.9 720.6,152.9 722.9,152.9 725.1,152.9 727.3,152.9 729.5,152.9 731.8,152.9 734.0,152.9 736.2,152.9 738.4,152.9 740.7,152.9 742.9,152.9 745.1,152.9 747.4,152.9 749.6,152.9 751.8,152.9 754.0,324.2 756.3,324.2 758.5,324.1 760.7,324.6 762.9,320.8 765.2,162.3 767.4,163.3 769.6,162.9 771.9,161.0 774.1,161.3 776.3,162.2 778.5,162.8 780.8,162.9 783.0,162.8 785.2,161.4 787.4,162.1 789.7,161.4 791.9,163.3 794.1,162.7 796.4,163.1 798.6,162.2 800.8,162.7 803.0,163.3 805.3,161.5 807.5,162.7 809.7,162.5 811.9,163.0 814.2,163.1 816.4,166.8 818.6,166.5 820.9,162.2 823.1,161.8 825.3,162.0 827.5,161.7 829.8,162.4 832.0,161.7 834.2,161.7 836.4,161.7 838.7,161.7 840.9,161.7 843.1,161.7 845.4,161.7 847.6,161.7 849.8,161.7 852.0,161.7 854.3,161.7 856.5,161.7 858.7,161.7 861.0,161.7 863.2,161.7 865.4,161.7 867.6,161.7 869.9,161.7 872.1,161.7 874.3,161.7 876.5,161.7 878.8,161.7 881.0,162.0 883.2,162.5 885.5,163.1 887.7,162.6 889.9,163.0 892.1,163.6 894.4,164.3 896.6,164.3 898.8,164.4 901.0,164.2 903.3,164.4 905.5,162.9 907.7,164.9 910.0,165.8 912.2,166.4 914.4,167.1 916.6,166.5 918.9,166.4 921.1,165.3 923.3,166.3 925.5,166.0 927.8,165.9 930.0,169.3" stroke="var(--team-news-hound)"/><circle class="end-dot" cx="930.0" cy="169.3" r="4.5" fill="var(--team-news-hound)"/><polyline class="line" points="68.0,129.4 70.2,130.2 72.5,130.2 74.7,130.2 76.9,128.8 79.1,138.8 81.4,130.3 83.6,126.9 85.8,126.9 88.0,126.9 90.3,126.9 92.5,126.9 94.7,126.9 97.0,126.9 99.2,126.9 101.4,126.9 103.6,126.9 105.9,126.9 108.1,126.9 110.3,126.9 112.5,126.9 114.8,126.9 117.0,126.9 119.2,126.9 121.5,126.9 123.7,126.9 125.9,126.9 128.1,126.9 130.4,126.9 132.6,126.9 134.8,126.9 137.0,126.9 139.3,126.9 141.5,126.9 143.7,126.9 146.0,126.9 148.2,126.9 150.4,126.9 152.6,126.9 154.9,126.9 157.1,126.9 159.3,126.9 161.6,126.9 163.8,126.9 166.0,126.9 168.2,126.9 170.5,126.9 172.7,126.9 174.9,126.9 177.1,126.9 179.4,126.9 181.6,126.9 183.8,126.9 186.1,126.9 188.3,126.9 190.5,126.9 192.7,126.9 195.0,126.9 197.2,126.9 199.4,126.9 201.6,126.9 203.9,126.9 206.1,126.9 208.3,126.9 210.6,126.9 212.8,126.9 215.0,126.9 217.2,126.9 219.5,126.9 221.7,126.9 223.9,126.9 226.1,126.9 228.4,126.9 230.6,119.6 232.8,128.5 235.1,126.2 237.3,108.0 239.5,106.5 241.7,116.8 244.0,116.8 246.2,116.8 248.4,116.8 250.6,116.8 252.9,119.1 255.1,120.0 257.3,107.8 259.6,106.8 261.8,110.7 264.0,109.7 266.2,109.1 268.5,107.8 270.7,107.8 272.9,105.6 275.1,107.2 277.4,110.2 279.6,107.3 281.8,106.6 284.1,119.6 286.3,116.8 288.5,116.8 290.7,111.6 293.0,112.8 295.2,117.9 297.4,120.8 299.6,119.4 301.9,120.3 304.1,122.0 306.3,120.6 308.6,119.8 310.8,119.1 313.0,120.0 315.2,119.9 317.5,122.5 319.7,124.7 321.9,120.0 324.1,122.0 326.4,122.0 328.6,123.5 330.8,124.7 333.1,124.5 335.3,122.0 337.5,121.2 339.7,122.0 342.0,125.7 344.2,125.1 346.4,122.2 348.7,123.9 350.9,122.3 353.1,125.7 355.3,126.7 357.6,126.7 359.8,125.8 362.0,129.4 364.2,131.3 366.5,131.3 368.7,131.3 370.9,131.3 373.2,131.3 375.4,131.3 377.6,131.3 379.8,130.2 382.1,130.1 384.3,132.3 386.5,132.8 388.7,132.8 391.0,133.3 393.2,132.3 395.4,136.5 397.7,136.5 399.9,136.5 402.1,136.5 404.3,136.5 406.6,136.5 408.8,136.5 411.0,136.5 413.2,136.5 415.5,136.5 417.7,136.5 419.9,136.5 422.2,136.5 424.4,136.5 426.6,136.5 428.8,136.5 431.1,136.5 433.3,136.5 435.5,136.5 437.7,136.5 440.0,136.5 442.2,136.5 444.4,136.5 446.7,136.5 448.9,136.5 451.1,136.5 453.3,136.5 455.6,136.5 457.8,136.5 460.0,136.5 462.2,136.5 464.5,136.5 466.7,136.5 468.9,136.5 471.2,136.5 473.4,136.5 475.6,136.5 477.8,136.5 480.1,136.5 482.3,136.5 484.5,136.5 486.7,136.5 489.0,136.5 491.2,136.5 493.4,136.5 495.7,136.5 497.9,136.5 500.1,136.5 502.3,136.5 504.6,136.5 506.8,136.5 509.0,136.5 511.3,136.5 513.5,136.5 515.7,136.5 517.9,136.5 520.2,136.5 522.4,136.5 524.6,136.5 526.8,136.5 529.1,136.5 531.3,136.5 533.5,136.5 535.8,149.8 538.0,153.5 540.2,152.9 542.4,152.9 544.7,152.4 546.9,152.4 549.1,154.0 551.3,154.2 553.6,154.8 555.8,155.1 558.0,155.1 560.3,152.2 562.5,153.3 564.7,154.7 566.9,154.9 569.2,154.7 571.4,154.5 573.6,154.7 575.8,155.0 578.1,153.9 580.3,155.1 582.5,155.5 584.8,155.6 587.0,155.5 589.2,155.4 591.4,155.6 593.7,154.7 595.9,154.6 598.1,154.7 600.3,155.3 602.6,154.6 604.8,154.8 607.0,153.0 609.3,151.5 611.5,149.3 613.7,155.5 615.9,155.7 618.2,155.8 620.4,155.8 622.6,155.8 624.8,156.0 627.1,156.2 629.3,156.2 631.5,156.2 633.8,153.3 636.0,154.5 638.2,156.8 640.4,156.5 642.7,156.6 644.9,159.6 647.1,157.5 649.3,157.8 651.6,157.7 653.8,157.8 656.0,161.6 658.3,156.9 660.5,155.8 662.7,159.1 664.9,158.9 667.2,156.1 669.4,151.4 671.6,160.3 673.9,158.7 676.1,158.7 678.3,159.1 680.5,158.7 682.8,158.7 685.0,155.7 687.2,149.6 689.4,160.7 691.7,160.8 693.9,177.7 696.1,161.2 698.4,161.6 700.6,160.9 702.8,160.9 705.0,160.9 707.3,160.9 709.5,160.9 711.7,160.9 713.9,160.9 716.2,160.9 718.4,160.9 720.6,160.9 722.9,160.9 725.1,160.9 727.3,160.9 729.5,160.9 731.8,160.9 734.0,160.9 736.2,160.9 738.4,160.9 740.7,160.9 742.9,160.9 745.1,160.9 747.4,160.9 749.6,160.9 751.8,160.9 754.0,160.9 756.3,160.9 758.5,160.9 760.7,160.9 762.9,160.9 765.2,160.9 767.4,160.9 769.6,160.9 771.9,160.9 774.1,160.9 776.3,160.2 778.5,161.1 780.8,170.3 783.0,160.5 785.2,160.2 787.4,160.2 789.7,160.2 791.9,159.8 794.1,160.0 796.4,160.7 798.6,160.5 800.8,160.3 803.0,160.1 805.3,160.3 807.5,160.5 809.7,160.0 811.9,159.7 814.2,160.1 816.4,160.2 818.6,160.3 820.9,160.3 823.1,160.9 825.3,160.8 827.5,161.0 829.8,161.0 832.0,161.0 834.2,161.4 836.4,161.1 838.7,162.6 840.9,164.3 843.1,160.8 845.4,159.8 847.6,162.5 849.8,163.2 852.0,163.2 854.3,163.3 856.5,161.7 858.7,161.6 861.0,161.3 863.2,161.1 865.4,161.3 867.6,161.3 869.9,161.3 872.1,161.3 874.3,161.3 876.5,166.1 878.8,172.3 881.0,157.9 883.2,157.5 885.5,158.1 887.7,157.5 889.9,158.0 892.1,158.6 894.4,159.3 896.6,159.3 898.8,159.4 901.0,159.2 903.3,159.1 905.5,159.1 907.7,159.2 910.0,159.2 912.2,161.1 914.4,163.6 916.6,165.2 918.9,164.8 921.1,157.7 923.3,160.0 925.5,160.1 927.8,159.0 930.0,159.0" stroke="var(--team-gambler)"/><circle class="end-dot" cx="930.0" cy="159.0" r="4.5" fill="var(--team-gambler)"/><polyline class="line" points="68.0,129.4 70.2,129.1 72.5,129.1 74.7,124.9 76.9,125.2 79.1,125.9 81.4,124.9 83.6,124.0 85.8,127.0 88.0,127.4 90.3,125.0 92.5,124.0 94.7,125.2 97.0,124.8 99.2,125.5 101.4,124.3 103.6,125.6 105.9,125.6 108.1,125.6 110.3,125.6 112.5,125.6 114.8,125.6 117.0,125.6 119.2,125.6 121.5,125.6 123.7,125.6 125.9,125.6 128.1,125.6 130.4,125.6 132.6,125.6 134.8,125.6 137.0,125.6 139.3,125.6 141.5,125.6 143.7,125.6 146.0,125.6 148.2,125.6 150.4,125.6 152.6,125.6 154.9,125.6 157.1,125.6 159.3,125.6 161.6,125.6 163.8,125.6 166.0,125.6 168.2,125.6 170.5,125.6 172.7,125.6 174.9,125.6 177.1,125.6 179.4,125.6 181.6,125.6 183.8,125.6 186.1,125.6 188.3,125.6 190.5,125.6 192.7,125.6 195.0,125.6 197.2,125.6 199.4,125.6 201.6,125.6 203.9,125.6 206.1,125.6 208.3,125.6 210.6,125.6 212.8,125.6 215.0,125.6 217.2,125.6 219.5,125.6 221.7,125.6 223.9,125.6 226.1,125.6 228.4,110.5 230.6,109.3 232.8,106.4 235.1,106.6 237.3,105.4 239.5,108.1 241.7,108.1 244.0,112.2 246.2,107.7 248.4,106.3 250.6,108.7 252.9,108.8 255.1,109.9 257.3,107.9 259.6,106.9 261.8,108.1 264.0,107.5 266.2,107.5 268.5,109.1 270.7,109.1 272.9,109.1 275.1,109.9 277.4,110.7 279.6,109.8 281.8,110.8 284.1,109.6 286.3,110.7 288.5,109.9 290.7,110.4 293.0,110.8 295.2,109.8 297.4,111.8 299.6,111.2 301.9,112.9 304.1,113.2 306.3,114.5 308.6,114.8 310.8,114.6 313.0,112.2 315.2,110.6 317.5,113.1 319.7,113.4 321.9,111.8 324.1,113.4 326.4,114.2 328.6,114.7 330.8,114.2 333.1,115.0 335.3,114.4 337.5,113.2 339.7,114.5 342.0,115.3 344.2,115.0 346.4,113.5 348.7,114.2 350.9,113.5 353.1,114.4 355.3,116.2 357.6,116.3 359.8,117.2 362.0,116.0 364.2,116.1 366.5,116.0 368.7,117.0 370.9,117.2 373.2,118.8 375.4,118.6 377.6,118.6 379.8,118.1 382.1,116.6 384.3,117.0 386.5,118.4 388.7,118.1 391.0,118.1 393.2,118.1 395.4,118.1 397.7,118.1 399.9,118.1 402.1,118.1 404.3,118.1 406.6,118.1 408.8,118.1 411.0,118.1 413.2,118.1 415.5,118.1 417.7,118.1 419.9,118.1 422.2,118.1 424.4,118.1 426.6,118.1 428.8,118.1 431.1,118.1 433.3,118.1 435.5,118.1 437.7,118.1 440.0,118.1 442.2,118.1 444.4,118.1 446.7,118.1 448.9,118.1 451.1,118.1 453.3,118.1 455.6,118.1 457.8,118.1 460.0,118.1 462.2,118.1 464.5,118.1 466.7,118.1 468.9,118.1 471.2,118.1 473.4,118.1 475.6,118.1 477.8,118.1 480.1,118.1 482.3,118.1 484.5,118.1 486.7,118.1 489.0,118.1 491.2,118.1 493.4,118.1 495.7,118.1 497.9,118.1 500.1,118.1 502.3,118.1 504.6,118.1 506.8,118.1 509.0,118.1 511.3,118.1 513.5,118.1 515.7,118.1 517.9,118.1 520.2,118.1 522.4,118.1 524.6,118.1 526.8,118.1 529.1,118.1 531.3,118.1 533.5,118.1 535.8,118.1 538.0,118.1 540.2,118.1 542.4,118.1 544.7,118.1 546.9,118.1 549.1,118.9 551.3,120.9 553.6,121.8 555.8,121.4 558.0,119.3 560.3,120.8 562.5,119.3 564.7,118.9 566.9,118.4 569.2,117.1 571.4,116.9 573.6,117.2 575.8,116.7 578.1,117.3 580.3,119.0 582.5,120.7 584.8,120.4 587.0,121.6 589.2,119.5 591.4,119.4 593.7,120.0 595.9,119.5 598.1,120.2 600.3,118.8 602.6,118.8 604.8,117.9 607.0,118.3 609.3,118.6 611.5,119.8 613.7,120.5 615.9,120.3 618.2,121.0 620.4,121.9 622.6,121.5 624.8,121.9 627.1,122.2 629.3,122.1 631.5,121.2 633.8,123.1 636.0,123.0 638.2,121.0 640.4,122.2 642.7,122.8 644.9,122.2 647.1,122.6 649.3,122.7 651.6,123.0 653.8,123.2 656.0,123.3 658.3,124.1 660.5,124.1 662.7,122.7 664.9,121.6 667.2,122.3 669.4,122.9 671.6,123.7 673.9,123.0 676.1,122.6 678.3,122.5 680.5,123.6 682.8,124.3 685.0,124.4 687.2,124.5 689.4,125.6 691.7,125.2 693.9,124.5 696.1,124.4 698.4,124.4 700.6,124.4 702.8,125.5 705.0,123.5 707.3,123.5 709.5,123.5 711.7,123.5 713.9,123.5 716.2,123.5 718.4,123.5 720.6,123.5 722.9,123.5 725.1,123.5 727.3,123.5 729.5,123.5 731.8,123.5 734.0,123.5 736.2,123.5 738.4,123.5 740.7,123.5 742.9,123.5 745.1,123.5 747.4,123.5 749.6,123.5 751.8,123.5 754.0,317.2 756.3,317.2 758.5,317.2 760.7,317.7 762.9,305.9 765.2,143.6 767.4,144.5 769.6,144.2 771.9,145.3 774.1,148.0 776.3,148.3 778.5,148.4 780.8,149.3 783.0,148.3 785.2,148.7 787.4,149.0 789.7,148.7 791.9,147.6 794.1,146.8 796.4,148.7 798.6,148.7 800.8,147.1 803.0,147.7 805.3,148.5 807.5,150.6 809.7,150.8 811.9,149.4 814.2,150.1 816.4,150.4 818.6,150.7 820.9,150.6 823.1,151.2 825.3,150.2 827.5,150.4 829.8,152.5 832.0,150.1 834.2,151.5 836.4,151.7 838.7,151.7 840.9,151.3 843.1,151.7 845.4,152.8 847.6,153.1 849.8,151.7 852.0,151.4 854.3,152.1 856.5,151.9 858.7,151.9 861.0,152.3 863.2,152.0 865.4,152.5 867.6,152.0 869.9,152.8 872.1,152.7 874.3,153.0 876.5,152.6 878.8,151.5 881.0,152.7 883.2,152.7 885.5,152.0 887.7,151.8 889.9,151.5 892.1,151.5 894.4,152.4 896.6,152.8 898.8,153.4 901.0,152.7 903.3,152.9 905.5,153.4 907.7,153.3 910.0,153.0 912.2,152.8 914.4,151.6 916.6,151.1 918.9,150.8 921.1,152.9 923.3,153.5 925.5,152.9 927.8,152.7 930.0,152.7" stroke="var(--team-scalper)"/><circle class="end-dot" cx="930.0" cy="152.7" r="4.5" fill="var(--team-scalper)"/><polyline class="line" points="68.0,129.4 70.2,127.6 72.5,130.5 74.7,121.6 76.9,122.0 79.1,126.5 81.4,129.8 83.6,127.3 85.8,123.7 88.0,111.4 90.3,115.9 92.5,125.1 94.7,123.0 97.0,119.6 99.2,125.7 101.4,119.0 103.6,125.3 105.9,125.3 108.1,125.3 110.3,125.3 112.5,125.3 114.8,125.3 117.0,125.3 119.2,125.3 121.5,125.3 123.7,125.3 125.9,125.3 128.1,125.3 130.4,125.3 132.6,125.3 134.8,125.3 137.0,125.3 139.3,125.3 141.5,125.3 143.7,125.3 146.0,125.3 148.2,125.3 150.4,125.3 152.6,125.3 154.9,125.3 157.1,125.3 159.3,125.3 161.6,125.3 163.8,125.3 166.0,125.3 168.2,125.3 170.5,125.3 172.7,125.3 174.9,125.3 177.1,125.3 179.4,125.3 181.6,125.3 183.8,125.3 186.1,125.3 188.3,125.3 190.5,125.3 192.7,125.3 195.0,125.3 197.2,125.3 199.4,125.3 201.6,125.3 203.9,125.3 206.1,125.3 208.3,125.3 210.6,125.3 212.8,125.3 215.0,125.3 217.2,125.3 219.5,125.3 221.7,125.3 223.9,125.3 226.1,125.3 228.4,118.7 230.6,114.7 232.8,114.0 235.1,113.8 237.3,112.5 239.5,129.4 241.7,114.1 244.0,122.3 246.2,113.6 248.4,114.5 250.6,112.9 252.9,122.6 255.1,130.1 257.3,129.1 259.6,117.9 261.8,117.4 264.0,119.3 266.2,117.2 268.5,116.7 270.7,114.7 272.9,115.8 275.1,115.8 277.4,115.8 279.6,115.8 281.8,115.8 284.1,115.8 286.3,115.8 288.5,115.8 290.7,115.8 293.0,115.8 295.2,115.8 297.4,115.8 299.6,115.8 301.9,115.8 304.1,115.8 306.3,115.8 308.6,115.8 310.8,115.8 313.0,115.8 315.2,115.8 317.5,115.8 319.7,115.8 321.9,115.8 324.1,115.8 326.4,115.8 328.6,115.8 330.8,115.8 333.1,115.8 335.3,115.8 337.5,115.8 339.7,115.8 342.0,115.8 344.2,115.8 346.4,115.8 348.7,115.8 350.9,115.8 353.1,115.8 355.3,116.2 357.6,116.5 359.8,117.1 362.0,116.8 364.2,117.4 366.5,116.8 368.7,116.2 370.9,115.9 373.2,116.8 375.4,116.8 377.6,117.7 379.8,117.7 382.1,117.7 384.3,118.1 386.5,117.5 388.7,118.1 391.0,118.6 393.2,120.1 395.4,110.8 397.7,110.8 399.9,110.8 402.1,110.8 404.3,110.8 406.6,110.5 408.8,110.5 411.0,110.5 413.2,110.5 415.5,110.5 417.7,110.5 419.9,110.5 422.2,110.5 424.4,110.5 426.6,110.5 428.8,110.5 431.1,110.5 433.3,110.5 435.5,110.5 437.7,110.5 440.0,110.5 442.2,110.5 444.4,110.5 446.7,110.5 448.9,110.5 451.1,110.5 453.3,110.5 455.6,110.5 457.8,110.5 460.0,110.5 462.2,110.5 464.5,110.5 466.7,110.5 468.9,110.5 471.2,110.5 473.4,110.5 475.6,110.5 477.8,110.5 480.1,110.5 482.3,110.5 484.5,110.5 486.7,110.5 489.0,110.5 491.2,110.5 493.4,110.5 495.7,110.5 497.9,110.5 500.1,110.5 502.3,110.5 504.6,110.5 506.8,110.5 509.0,110.5 511.3,110.5 513.5,110.5 515.7,110.5 517.9,110.5 520.2,110.5 522.4,110.5 524.6,110.5 526.8,110.5 529.1,110.5 531.3,110.5 533.5,110.5 535.8,123.6 538.0,124.9 540.2,123.3 542.4,123.7 544.7,123.6 546.9,139.3 549.1,139.3 551.3,133.7 553.6,136.8 555.8,147.4 558.0,141.5 560.3,136.1 562.5,142.6 564.7,140.8 566.9,140.6 569.2,139.0 571.4,137.5 573.6,137.7 575.8,138.4 578.1,139.3 580.3,139.2 582.5,138.3 584.8,138.0 587.0,138.3 589.2,138.3 591.4,138.3 593.7,138.3 595.9,138.3 598.1,138.3 600.3,138.3 602.6,138.3 604.8,138.3 607.0,138.3 609.3,138.3 611.5,138.3 613.7,138.3 615.9,138.3 618.2,138.3 620.4,138.3 622.6,138.3 624.8,138.3 627.1,138.3 629.3,138.3 631.5,138.3 633.8,138.3 636.0,138.3 638.2,138.3 640.4,138.3 642.7,138.3 644.9,138.3 647.1,138.3 649.3,138.3 651.6,138.3 653.8,138.3 656.0,138.3 658.3,138.3 660.5,138.3 662.7,138.3 664.9,138.3 667.2,138.3 669.4,138.3 671.6,138.3 673.9,138.3 676.1,138.3 678.3,138.3 680.5,138.3 682.8,138.3 685.0,138.3 687.2,138.3 689.4,138.3 691.7,138.3 693.9,138.3 696.1,138.3 698.4,138.3 700.6,138.3 702.8,138.3 705.0,138.3 707.3,138.3 709.5,138.3 711.7,138.3 713.9,138.3 716.2,138.3 718.4,138.3 720.6,138.3 722.9,138.3 725.1,138.3 727.3,138.3 729.5,138.3 731.8,138.3 734.0,138.3 736.2,138.3 738.4,138.3 740.7,138.3 742.9,138.3 745.1,138.3 747.4,138.3 749.6,138.3 751.8,138.3 754.0,138.3 756.3,138.3 758.5,138.3 760.7,138.3 762.9,138.3 765.2,138.3 767.4,138.3 769.6,138.3 771.9,138.3 774.1,138.3 776.3,138.3 778.5,138.3 780.8,138.3 783.0,138.3 785.2,138.3 787.4,138.3 789.7,138.3 791.9,138.3 794.1,138.3 796.4,138.3 798.6,138.3 800.8,138.3 803.0,138.3 805.3,138.3 807.5,138.3 809.7,138.3 811.9,138.3 814.2,138.3 816.4,138.3 818.6,138.3 820.9,138.3 823.1,138.3 825.3,138.3 827.5,138.3 829.8,138.3 832.0,138.3 834.2,138.3 836.4,138.3 838.7,138.3 840.9,138.3 843.1,138.3 845.4,138.3 847.6,138.3 849.8,138.3 852.0,138.3 854.3,138.3 856.5,138.3 858.7,138.3 861.0,138.3 863.2,138.3 865.4,138.3 867.6,138.3 869.9,138.3 872.1,138.3 874.3,138.3 876.5,138.3 878.8,138.3 881.0,138.3 883.2,138.3 885.5,138.3 887.7,138.3 889.9,138.3 892.1,138.3 894.4,138.3 896.6,138.3 898.8,138.3 901.0,138.3 903.3,138.3 905.5,138.3 907.7,138.3 910.0,138.3 912.2,138.3 914.4,138.3 916.6,138.3 918.9,138.3 921.1,138.3 923.3,138.3 925.5,138.3 927.8,138.3 930.0,138.3" stroke="var(--team-mean-reverter)"/><circle class="end-dot" cx="930.0" cy="138.3" r="4.5" fill="var(--team-mean-reverter)"/><polyline class="line" points="68.0,129.4 70.2,129.4 72.5,129.4 74.7,129.4 76.9,129.4 79.1,129.4 81.4,129.4 83.6,129.4 85.8,129.4 88.0,129.4 90.3,129.4 92.5,129.4 94.7,129.4 97.0,129.4 99.2,129.4 101.4,129.4 103.6,129.4 105.9,129.4 108.1,129.4 110.3,129.4 112.5,129.4 114.8,129.4 117.0,129.4 119.2,129.4 121.5,129.4 123.7,129.4 125.9,129.4 128.1,129.4 130.4,129.4 132.6,129.4 134.8,129.4 137.0,129.4 139.3,129.4 141.5,129.4 143.7,129.4 146.0,129.4 148.2,129.4 150.4,129.4 152.6,129.4 154.9,129.4 157.1,129.4 159.3,129.4 161.6,129.4 163.8,129.4 166.0,129.4 168.2,129.4 170.5,129.4 172.7,129.4 174.9,129.4 177.1,129.4 179.4,129.4 181.6,129.4 183.8,129.4 186.1,129.4 188.3,129.4 190.5,129.4 192.7,129.4 195.0,129.4 197.2,129.4 199.4,129.4 201.6,129.4 203.9,129.4 206.1,129.4 208.3,129.4 210.6,129.4 212.8,129.4 215.0,129.4 217.2,129.4 219.5,129.4 221.7,129.4 223.9,129.4 226.1,129.4 228.4,129.4 230.6,129.4 232.8,129.4 235.1,129.4 237.3,129.4 239.5,129.4 241.7,129.4 244.0,129.4 246.2,129.4 248.4,129.4 250.6,129.4 252.9,129.4 255.1,129.4 257.3,129.4 259.6,129.4 261.8,129.4 264.0,129.4 266.2,129.4 268.5,129.4 270.7,129.4 272.9,129.4 275.1,129.4 277.4,129.4 279.6,129.4 281.8,129.4 284.1,129.4 286.3,129.4 288.5,129.4 290.7,129.4 293.0,129.4 295.2,129.4 297.4,129.4 299.6,129.4 301.9,129.4 304.1,129.4 306.3,129.4 308.6,129.4 310.8,129.4 313.0,129.4 315.2,129.4 317.5,129.4 319.7,129.4 321.9,129.4 324.1,129.4 326.4,129.4 328.6,129.4 330.8,129.4 333.1,129.4 335.3,129.4 337.5,129.4 339.7,129.4 342.0,129.4 344.2,129.4 346.4,129.4 348.7,129.4 350.9,129.4 353.1,129.4 355.3,129.4 357.6,129.4 359.8,129.4 362.0,129.4 364.2,129.4 366.5,129.4 368.7,129.4 370.9,129.4 373.2,129.4 375.4,129.4 377.6,129.4 379.8,129.4 382.1,129.4 384.3,129.4 386.5,129.4 388.7,129.4 391.0,129.4 393.2,129.4 395.4,129.4 397.7,129.4 399.9,129.4 402.1,129.4 404.3,129.4 406.6,129.4 408.8,129.4 411.0,129.4 413.2,129.4 415.5,129.4 417.7,129.4 419.9,129.4 422.2,129.4 424.4,129.4 426.6,129.4 428.8,129.4 431.1,129.4 433.3,129.4 435.5,129.4 437.7,129.4 440.0,129.4 442.2,129.4 444.4,129.4 446.7,129.4 448.9,129.4 451.1,129.4 453.3,129.4 455.6,129.4 457.8,129.4 460.0,129.4 462.2,129.4 464.5,129.4 466.7,129.4 468.9,129.4 471.2,129.4 473.4,129.4 475.6,129.4 477.8,129.4 480.1,129.4 482.3,129.4 484.5,129.4 486.7,129.4 489.0,129.4 491.2,129.4 493.4,129.4 495.7,129.4 497.9,129.4 500.1,129.4 502.3,129.4 504.6,129.4 506.8,129.4 509.0,129.4 511.3,129.4 513.5,129.4 515.7,129.4 517.9,129.4 520.2,129.4 522.4,129.4 524.6,129.4 526.8,129.4 529.1,129.4 531.3,129.4 533.5,129.4 535.8,129.4 538.0,129.4 540.2,129.4 542.4,129.4 544.7,129.4 546.9,129.4 549.1,129.4 551.3,129.4 553.6,129.4 555.8,129.4 558.0,129.4 560.3,129.4 562.5,129.4 564.7,129.4 566.9,129.4 569.2,129.4 571.4,129.4 573.6,129.4 575.8,129.4 578.1,129.4 580.3,129.4 582.5,129.4 584.8,129.4 587.0,129.4 589.2,129.4 591.4,129.4 593.7,129.4 595.9,129.4 598.1,129.4 600.3,129.4 602.6,129.4 604.8,129.4 607.0,129.4 609.3,129.4 611.5,129.4 613.7,129.4 615.9,129.4 618.2,129.4 620.4,129.4 622.6,129.4 624.8,129.4 627.1,129.4 629.3,129.4 631.5,129.4 633.8,129.4 636.0,129.4 638.2,129.4 640.4,129.4 642.7,129.4 644.9,129.4 647.1,129.4 649.3,129.4 651.6,129.4 653.8,129.4 656.0,129.4 658.3,129.4 660.5,129.4 662.7,129.4 664.9,129.4 667.2,129.4 669.4,129.4 671.6,129.4 673.9,129.4 676.1,129.4 678.3,129.4 680.5,129.4 682.8,129.4 685.0,129.4 687.2,129.4 689.4,129.4 691.7,129.4 693.9,129.4 696.1,129.4 698.4,129.4 700.6,129.4 702.8,129.4 705.0,129.4 707.3,129.4 709.5,129.4 711.7,129.4 713.9,129.4 716.2,129.4 718.4,129.4 720.6,129.4 722.9,129.4 725.1,129.4 727.3,129.4 729.5,129.4 731.8,129.4 734.0,129.4 736.2,129.4 738.4,129.4 740.7,129.4 742.9,129.4 745.1,129.4 747.4,129.4 749.6,129.4 751.8,129.4 754.0,129.4 756.3,129.4 758.5,129.4 760.7,129.4 762.9,129.4 765.2,129.4 767.4,129.4 769.6,129.4 771.9,129.4 774.1,129.4 776.3,129.4 778.5,129.4 780.8,129.4 783.0,129.4 785.2,129.4 787.4,129.4 789.7,129.4 791.9,129.4 794.1,129.4 796.4,129.4 798.6,129.4 800.8,129.4 803.0,129.4 805.3,129.4 807.5,129.4 809.7,129.4 811.9,129.4 814.2,129.4 816.4,129.4 818.6,129.4 820.9,129.4 823.1,129.4 825.3,129.4 827.5,129.4 829.8,129.4 832.0,129.4 834.2,129.4 836.4,129.3 838.7,129.8 840.9,129.6 843.1,128.5 845.4,129.2 847.6,129.8 849.8,129.7 852.0,128.9 854.3,130.2 856.5,130.2 858.7,130.3 861.0,130.4 863.2,130.4 865.4,130.3 867.6,129.3 869.9,129.4 872.1,129.3 874.3,129.3 876.5,128.8 878.8,128.9 881.0,128.4 883.2,129.4 885.5,129.3 887.7,129.8 889.9,129.5 892.1,129.2 894.4,130.4 896.6,130.6 898.8,130.6 901.0,129.7 903.3,131.2 905.5,128.7 907.7,130.9 910.0,130.7 912.2,128.7 914.4,131.2 916.6,128.8 918.9,130.3 921.1,137.7 923.3,135.5 925.5,135.6 927.8,135.8 930.0,134.7" stroke="var(--team-stat-arb)"/><circle class="end-dot" cx="930.0" cy="134.7" r="4.5" fill="var(--team-stat-arb)"/><polyline class="line" points="68.0,129.4 70.2,129.3 72.5,133.5 74.7,133.4 76.9,132.0 79.1,131.9 81.4,132.8 83.6,132.8 85.8,132.7 88.0,132.7 90.3,132.1 92.5,132.2 94.7,132.7 97.0,132.6 99.2,132.9 101.4,133.1 103.6,130.6 105.9,130.6 108.1,130.6 110.3,130.6 112.5,130.6 114.8,130.6 117.0,130.6 119.2,130.6 121.5,130.6 123.7,130.6 125.9,130.6 128.1,130.6 130.4,130.6 132.6,130.6 134.8,130.6 137.0,130.6 139.3,130.6 141.5,130.6 143.7,130.6 146.0,130.6 148.2,130.6 150.4,130.6 152.6,130.6 154.9,130.6 157.1,130.6 159.3,130.6 161.6,130.6 163.8,130.6 166.0,130.6 168.2,130.6 170.5,130.6 172.7,130.6 174.9,130.6 177.1,130.6 179.4,130.6 181.6,130.6 183.8,130.6 186.1,130.6 188.3,130.6 190.5,130.6 192.7,130.6 195.0,130.6 197.2,130.6 199.4,130.6 201.6,130.6 203.9,130.6 206.1,130.6 208.3,130.6 210.6,130.6 212.8,130.6 215.0,130.6 217.2,130.6 219.5,130.6 221.7,130.6 223.9,130.6 226.1,130.6 228.4,130.7 230.6,131.6 232.8,131.9 235.1,130.3 237.3,132.2 239.5,132.1 241.7,131.0 244.0,132.0 246.2,131.1 248.4,131.3 250.6,129.7 252.9,130.0 255.1,129.7 257.3,130.0 259.6,129.1 261.8,129.1 264.0,129.1 266.2,129.3 268.5,129.1 270.7,129.1 272.9,128.7 275.1,129.1 277.4,128.2 279.6,128.6 281.8,127.8 284.1,128.1 286.3,127.8 288.5,128.8 290.7,129.3 293.0,129.0 295.2,129.3 297.4,129.1 299.6,129.0 301.9,129.5 304.1,129.7 306.3,129.6 308.6,129.0 310.8,128.9 313.0,128.9 315.2,129.7 317.5,129.7 319.7,129.7 321.9,129.7 324.1,129.7 326.4,129.7 328.6,129.7 330.8,129.7 333.1,129.7 335.3,129.7 337.5,129.7 339.7,129.7 342.0,129.7 344.2,129.7 346.4,129.7 348.7,129.7 350.9,129.7 353.1,129.7 355.3,129.7 357.6,129.7 359.8,129.7 362.0,129.7 364.2,129.7 366.5,129.7 368.7,129.7 370.9,129.7 373.2,129.7 375.4,129.7 377.6,129.7 379.8,129.7 382.1,129.7 384.3,129.7 386.5,129.7 388.7,129.7 391.0,129.7 393.2,129.7 395.4,128.4 397.7,128.4 399.9,128.4 402.1,128.4 404.3,128.4 406.6,130.4 408.8,130.4 411.0,130.4 413.2,130.4 415.5,130.4 417.7,130.4 419.9,130.4 422.2,130.4 424.4,130.4 426.6,130.4 428.8,130.4 431.1,130.4 433.3,130.4 435.5,130.4 437.7,130.4 440.0,130.4 442.2,130.4 444.4,130.4 446.7,130.4 448.9,130.4 451.1,130.4 453.3,130.4 455.6,130.4 457.8,130.4 460.0,130.4 462.2,130.4 464.5,130.4 466.7,130.4 468.9,130.4 471.2,130.4 473.4,130.4 475.6,130.4 477.8,130.4 480.1,130.4 482.3,130.4 484.5,130.4 486.7,130.4 489.0,130.4 491.2,130.4 493.4,130.4 495.7,130.4 497.9,130.4 500.1,130.4 502.3,130.4 504.6,130.4 506.8,130.4 509.0,130.4 511.3,130.4 513.5,130.4 515.7,130.4 517.9,130.4 520.2,130.4 522.4,130.4 524.6,130.4 526.8,130.4 529.1,130.4 531.3,130.4 533.5,130.4 535.8,130.4 538.0,130.4 540.2,130.4 542.4,130.4 544.7,130.4 546.9,141.4 549.1,125.5 551.3,132.6 553.6,132.6 555.8,132.6 558.0,132.6 560.3,132.6 562.5,132.6 564.7,132.6 566.9,132.6 569.2,132.6 571.4,132.6 573.6,132.6 575.8,132.6 578.1,132.6 580.3,132.6 582.5,132.6 584.8,132.6 587.0,132.6 589.2,132.6 591.4,132.6 593.7,132.6 595.9,132.6 598.1,132.6 600.3,132.6 602.6,132.6 604.8,132.6 607.0,132.6 609.3,132.6 611.5,132.6 613.7,132.6 615.9,132.6 618.2,132.6 620.4,132.6 622.6,132.6 624.8,132.6 627.1,132.6 629.3,132.6 631.5,132.6 633.8,132.6 636.0,132.6 638.2,132.6 640.4,132.9 642.7,133.1 644.9,133.1 647.1,133.1 649.3,133.1 651.6,133.1 653.8,133.1 656.0,133.1 658.3,133.1 660.5,133.1 662.7,133.1 664.9,133.1 667.2,133.3 669.4,133.8 671.6,133.8 673.9,133.8 676.1,133.8 678.3,133.7 680.5,133.0 682.8,123.6 685.0,134.2 687.2,125.5 689.4,132.9 691.7,125.4 693.9,133.3 696.1,133.0 698.4,132.6 700.6,125.1 702.8,133.4 705.0,136.2 707.3,136.2 709.5,136.2 711.7,136.2 713.9,136.2 716.2,136.2 718.4,136.2 720.6,136.2 722.9,136.2 725.1,136.2 727.3,136.2 729.5,136.2 731.8,136.2 734.0,136.2 736.2,136.2 738.4,136.2 740.7,136.2 742.9,136.2 745.1,136.2 747.4,136.2 749.6,136.2 751.8,136.2 754.0,147.2 756.3,147.2 758.5,147.2 760.7,147.2 762.9,131.3 765.2,133.0 767.4,130.9 769.6,130.4 771.9,125.3 774.1,125.4 776.3,127.0 778.5,127.4 780.8,128.7 783.0,130.8 785.2,130.1 787.4,130.0 789.7,130.0 791.9,130.9 794.1,130.5 796.4,129.4 798.6,129.0 800.8,128.4 803.0,128.0 805.3,128.6 807.5,128.8 809.7,128.7 811.9,128.7 814.2,128.6 816.4,128.7 818.6,128.1 820.9,128.0 823.1,127.5 825.3,127.3 827.5,127.2 829.8,127.2 832.0,127.0 834.2,127.1 836.4,126.8 838.7,126.7 840.9,126.8 843.1,127.3 845.4,126.9 847.6,126.8 849.8,127.0 852.0,126.5 854.3,127.4 856.5,127.7 858.7,127.9 861.0,128.0 863.2,128.9 865.4,128.8 867.6,129.0 869.9,128.5 872.1,128.2 874.3,127.7 876.5,127.8 878.8,127.7 881.0,128.1 883.2,127.3 885.5,126.9 887.7,127.8 889.9,127.7 892.1,127.9 894.4,128.0 896.6,127.8 898.8,127.2 901.0,127.4 903.3,127.8 905.5,128.2 907.7,128.1 910.0,127.8 912.2,127.6 914.4,127.7 916.6,127.8 918.9,127.6 921.1,127.5 923.3,126.6 925.5,127.2 927.8,126.6 930.0,126.5" stroke="var(--team-vol-breakout)"/><circle class="end-dot" cx="930.0" cy="126.5" r="4.5" fill="var(--team-vol-breakout)"/><polyline class="line" points="68.0,129.4 70.2,124.4 72.5,123.6 74.7,132.1 76.9,128.5 79.1,128.6 81.4,125.7 83.6,124.8 85.8,124.1 88.0,127.3 90.3,128.5 92.5,128.3 94.7,127.3 97.0,126.8 99.2,127.7 101.4,121.9 103.6,121.9 105.9,121.9 108.1,121.9 110.3,121.9 112.5,121.9 114.8,121.9 117.0,121.9 119.2,121.9 121.5,121.9 123.7,121.9 125.9,121.9 128.1,121.9 130.4,121.9 132.6,121.9 134.8,121.9 137.0,121.9 139.3,121.9 141.5,121.9 143.7,121.9 146.0,121.9 148.2,121.9 150.4,121.9 152.6,121.9 154.9,121.9 157.1,121.9 159.3,121.9 161.6,121.9 163.8,121.9 166.0,121.9 168.2,121.9 170.5,121.9 172.7,121.9 174.9,121.9 177.1,121.9 179.4,121.9 181.6,121.9 183.8,121.9 186.1,121.9 188.3,121.9 190.5,121.9 192.7,121.9 195.0,121.9 197.2,121.9 199.4,121.9 201.6,121.9 203.9,121.9 206.1,121.9 208.3,121.9 210.6,121.9 212.8,121.9 215.0,121.9 217.2,121.9 219.5,119.5 221.7,118.7 223.9,118.6 226.1,117.9 228.4,124.3 230.6,122.8 232.8,120.7 235.1,122.7 237.3,126.3 239.5,126.6 241.7,129.5 244.0,125.9 246.2,132.0 248.4,134.6 250.6,137.2 252.9,137.0 255.1,136.0 257.3,133.8 259.6,132.7 261.8,133.7 264.0,131.2 266.2,138.7 268.5,133.5 270.7,128.7 272.9,128.9 275.1,128.6 277.4,128.3 279.6,130.7 281.8,130.6 284.1,128.0 286.3,126.8 288.5,126.8 290.7,135.9 293.0,129.4 295.2,137.8 297.4,131.0 299.6,131.0 301.9,130.8 304.1,130.4 306.3,130.9 308.6,130.9 310.8,130.8 313.0,130.3 315.2,130.0 317.5,130.8 319.7,131.0 321.9,132.6 324.1,141.4 326.4,131.8 328.6,130.6 330.8,131.2 333.1,134.1 335.3,132.2 337.5,133.4 339.7,132.8 342.0,132.8 344.2,132.4 346.4,132.5 348.7,133.6 350.9,133.1 353.1,133.5 355.3,133.6 357.6,134.7 359.8,135.2 362.0,134.6 364.2,133.5 366.5,133.6 368.7,133.4 370.9,133.7 373.2,135.0 375.4,134.4 377.6,134.7 379.8,135.2 382.1,137.4 384.3,136.7 386.5,137.3 388.7,138.6 391.0,138.6 393.2,150.0 395.4,139.4 397.7,139.4 399.9,139.4 402.1,139.4 404.3,139.4 406.6,139.4 408.8,139.4 411.0,139.4 413.2,139.4 415.5,139.4 417.7,139.4 419.9,139.4 422.2,139.4 424.4,139.4 426.6,139.4 428.8,139.4 431.1,139.4 433.3,139.4 435.5,139.4 437.7,139.4 440.0,139.4 442.2,139.4 444.4,139.4 446.7,139.4 448.9,139.4 451.1,139.4 453.3,139.4 455.6,139.4 457.8,139.4 460.0,139.4 462.2,139.4 464.5,139.4 466.7,139.4 468.9,139.4 471.2,139.4 473.4,139.4 475.6,139.4 477.8,139.4 480.1,139.4 482.3,139.4 484.5,139.4 486.7,139.4 489.0,139.4 491.2,139.4 493.4,139.4 495.7,139.4 497.9,139.4 500.1,139.4 502.3,139.4 504.6,139.4 506.8,139.4 509.0,139.4 511.3,139.4 513.5,139.4 515.7,139.4 517.9,139.4 520.2,139.4 522.4,139.4 524.6,139.4 526.8,139.4 529.1,139.4 531.3,139.4 533.5,139.4 535.8,139.4 538.0,139.4 540.2,139.4 542.4,139.4 544.7,139.4 546.9,139.4 549.1,139.4 551.3,146.8 553.6,141.7 555.8,142.7 558.0,142.0 560.3,139.2 562.5,140.2 564.7,141.5 566.9,141.7 569.2,141.6 571.4,140.8 573.6,141.3 575.8,141.7 578.1,141.3 580.3,141.5 582.5,139.7 584.8,139.4 587.0,140.0 589.2,141.2 591.4,140.8 593.7,141.0 595.9,140.8 598.1,139.2 600.3,139.4 602.6,138.2 604.8,139.2 607.0,138.6 609.3,138.8 611.5,137.7 613.7,133.4 615.9,138.8 618.2,139.6 620.4,141.0 622.6,139.2 624.8,139.8 627.1,140.7 629.3,141.9 631.5,141.7 633.8,141.8 636.0,141.8 638.2,141.6 640.4,141.1 642.7,140.7 644.9,140.4 647.1,139.8 649.3,139.7 651.6,139.4 653.8,138.1 656.0,140.0 658.3,139.2 660.5,138.9 662.7,138.7 664.9,138.7 667.2,138.1 669.4,137.8 671.6,137.1 673.9,136.8 676.1,137.5 678.3,138.0 680.5,136.5 682.8,135.7 685.0,137.1 687.2,137.2 689.4,136.2 691.7,136.4 693.9,142.2 696.1,133.9 698.4,126.6 700.6,125.1 702.8,126.0 705.0,139.8 707.3,139.8 709.5,139.8 711.7,139.8 713.9,139.8 716.2,139.8 718.4,139.8 720.6,139.8 722.9,139.8 725.1,139.8 727.3,139.8 729.5,139.8 731.8,139.8 734.0,139.8 736.2,139.8 738.4,139.8 740.7,139.8 742.9,139.8 745.1,139.8 747.4,139.8 749.6,139.8 751.8,139.8 754.0,128.0 756.3,128.0 758.5,128.0 760.7,128.0 762.9,121.0 765.2,118.5 767.4,103.8 769.6,101.2 771.9,105.3 774.1,100.0 776.3,102.2 778.5,93.0 780.8,90.9 783.0,80.2 785.2,83.4 787.4,84.7 789.7,80.1 791.9,75.9 794.1,75.2 796.4,80.2 798.6,96.3 800.8,93.5 803.0,92.9 805.3,93.6 807.5,94.0 809.7,93.6 811.9,94.3 814.2,93.3 816.4,92.1 818.6,91.7 820.9,93.4 823.1,92.7 825.3,91.3 827.5,91.8 829.8,91.5 832.0,92.1 834.2,90.7 836.4,90.3 838.7,91.1 840.9,90.6 843.1,90.9 845.4,90.6 847.6,89.2 849.8,92.3 852.0,92.9 854.3,93.0 856.5,92.8 858.7,94.0 861.0,94.6 863.2,98.1 865.4,98.4 867.6,93.3 869.9,94.8 872.1,97.9 874.3,89.2 876.5,85.8 878.8,98.9 881.0,89.4 883.2,89.5 885.5,99.3 887.7,96.8 889.9,96.8 892.1,94.5 894.4,96.7 896.6,95.3 898.8,95.4 901.0,93.4 903.3,94.4 905.5,93.3 907.7,93.6 910.0,92.0 912.2,92.2 914.4,93.8 916.6,91.5 918.9,93.3 921.1,96.6 923.3,96.4 925.5,97.1 927.8,92.8 930.0,95.0" stroke="var(--team-trend-rider)"/><circle class="end-dot" cx="930.0" cy="95.0" r="4.5" fill="var(--team-trend-rider)"/><polyline class="line" points="68.0,129.4 70.2,133.1 72.5,120.6 74.7,126.3 76.9,123.6 79.1,124.7 81.4,121.7 83.6,118.2 85.8,118.5 88.0,122.0 90.3,122.1 92.5,121.3 94.7,114.3 97.0,112.1 99.2,119.6 101.4,118.2 103.6,112.2 105.9,112.2 108.1,112.2 110.3,112.2 112.5,112.2 114.8,112.2 117.0,112.2 119.2,112.2 121.5,112.2 123.7,112.2 125.9,112.2 128.1,112.2 130.4,112.2 132.6,112.2 134.8,112.2 137.0,112.2 139.3,112.2 141.5,112.2 143.7,112.2 146.0,112.2 148.2,112.2 150.4,112.2 152.6,112.2 154.9,112.2 157.1,112.2 159.3,112.2 161.6,112.2 163.8,112.2 166.0,112.2 168.2,112.2 170.5,112.2 172.7,112.2 174.9,112.2 177.1,112.2 179.4,112.2 181.6,112.2 183.8,112.2 186.1,112.2 188.3,112.2 190.5,112.2 192.7,112.2 195.0,112.2 197.2,112.2 199.4,112.2 201.6,112.2 203.9,112.2 206.1,112.2 208.3,112.2 210.6,112.2 212.8,112.2 215.0,112.2 217.2,112.2 219.5,112.2 221.7,112.2 223.9,112.2 226.1,112.2 228.4,88.8 230.6,69.5 232.8,64.1 235.1,55.1 237.3,55.1 239.5,49.3 241.7,52.8 244.0,58.4 246.2,50.7 248.4,44.2 250.6,53.5 252.9,53.4 255.1,60.8 257.3,54.3 259.6,52.5 261.8,57.0 264.0,44.8 266.2,45.5 268.5,56.1 270.7,40.9 272.9,42.4 275.1,39.3 277.4,40.8 279.6,50.9 281.8,49.4 284.1,35.4 286.3,36.7 288.5,48.2 290.7,48.3 293.0,37.6 295.2,38.1 297.4,42.4 299.6,50.5 301.9,55.3 304.1,44.3 306.3,48.1 308.6,45.1 310.8,56.0 313.0,55.1 315.2,45.3 317.5,44.2 319.7,54.3 321.9,53.9 324.1,42.3 326.4,52.0 328.6,49.7 330.8,60.5 333.1,49.9 335.3,59.5 337.5,59.8 339.7,56.0 342.0,51.1 344.2,56.2 346.4,48.9 348.7,36.7 350.9,46.0 353.1,45.7 355.3,49.9 357.6,48.8 359.8,53.8 362.0,48.9 364.2,46.8 366.5,59.7 368.7,46.8 370.9,56.4 373.2,45.9 375.4,45.5 377.6,39.3 379.8,58.7 382.1,52.2 384.3,52.8 386.5,61.6 388.7,44.0 391.0,51.7 393.2,42.8 395.4,49.1 397.7,48.9 399.9,48.8 402.1,48.8 404.3,48.8 406.6,48.8 408.8,48.8 411.0,48.8 413.2,48.8 415.5,48.8 417.7,48.8 419.9,48.8 422.2,48.8 424.4,48.8 426.6,48.8 428.8,48.8 431.1,48.8 433.3,48.8 435.5,48.8 437.7,48.8 440.0,48.8 442.2,48.8 444.4,48.8 446.7,48.8 448.9,48.8 451.1,48.8 453.3,48.8 455.6,48.8 457.8,48.8 460.0,48.8 462.2,48.8 464.5,48.8 466.7,48.8 468.9,48.8 471.2,48.8 473.4,48.8 475.6,48.8 477.8,48.8 480.1,48.8 482.3,48.8 484.5,48.8 486.7,48.8 489.0,48.8 491.2,48.8 493.4,48.8 495.7,48.8 497.9,48.8 500.1,48.8 502.3,48.8 504.6,48.8 506.8,48.8 509.0,48.8 511.3,48.8 513.5,48.8 515.7,48.8 517.9,48.8 520.2,48.8 522.4,48.8 524.6,48.8 526.8,48.8 529.1,48.8 531.3,48.8 533.5,48.8 535.8,48.8 538.0,48.8 540.2,48.8 542.4,48.8 544.7,48.8 546.9,63.6 549.1,65.8 551.3,69.7 553.6,69.9 555.8,73.5 558.0,74.7 560.3,74.3 562.5,71.8 564.7,77.0 566.9,78.0 569.2,69.1 571.4,74.2 573.6,69.1 575.8,78.9 578.1,68.1 580.3,67.3 582.5,78.0 584.8,77.3 587.0,69.1 589.2,72.7 591.4,73.4 593.7,70.8 595.9,69.4 598.1,69.8 600.3,70.3 602.6,63.1 604.8,61.9 607.0,61.3 609.3,63.3 611.5,59.0 613.7,53.3 615.9,57.9 618.2,60.5 620.4,60.3 622.6,62.8 624.8,61.3 627.1,61.8 629.3,65.8 631.5,65.9 633.8,74.7 636.0,74.4 638.2,71.9 640.4,64.6 642.7,69.6 644.9,63.2 647.1,70.5 649.3,71.9 651.6,64.9 653.8,59.8 656.0,69.5 658.3,73.1 660.5,64.6 662.7,64.0 664.9,61.5 667.2,62.8 669.4,61.6 671.6,59.2 673.9,56.5 676.1,58.1 678.3,63.4 680.5,60.3 682.8,60.3 685.0,60.2 687.2,61.2 689.4,61.9 691.7,59.3 693.9,59.9 696.1,59.7 698.4,59.2 700.6,58.5 702.8,58.7 705.0,60.4 707.3,60.4 709.5,60.4 711.7,60.4 713.9,60.4 716.2,60.4 718.4,60.4 720.6,60.4 722.9,60.4 725.1,60.4 727.3,60.4 729.5,60.4 731.8,60.4 734.0,60.4 736.2,60.4 738.4,60.4 740.7,60.4 742.9,60.4 745.1,60.4 747.4,60.4 749.6,60.4 751.8,60.4 754.0,88.4 756.3,88.4 758.5,88.4 760.7,88.4 762.9,82.9 765.2,85.1 767.4,97.7 769.6,95.9 771.9,98.5 774.1,97.5 776.3,91.8 778.5,93.6 780.8,91.2 783.0,96.8 785.2,95.4 787.4,96.7 789.7,96.8 791.9,96.9 794.1,90.6 796.4,96.7 798.6,94.7 800.8,91.5 803.0,93.9 805.3,90.9 807.5,93.9 809.7,93.6 811.9,92.8 814.2,91.0 816.4,97.2 818.6,94.6 820.9,92.9 823.1,94.4 825.3,99.0 827.5,95.8 829.8,96.9 832.0,95.0 834.2,91.6 836.4,90.0 838.7,96.0 840.9,88.6 843.1,91.7 845.4,82.2 847.6,84.1 849.8,83.6 852.0,83.2 854.3,76.1 856.5,83.2 858.7,87.7 861.0,85.9 863.2,78.0 865.4,86.8 867.6,77.4 869.9,80.5 872.1,85.2 874.3,88.2 876.5,84.6 878.8,84.6 881.0,84.5 883.2,84.6 885.5,82.1 887.7,89.9 889.9,79.4 892.1,85.0 894.4,79.7 896.6,79.9 898.8,80.0 901.0,79.6 903.3,79.7 905.5,79.9 907.7,79.8 910.0,83.7 912.2,81.0 914.4,84.7 916.6,82.5 918.9,82.4 921.1,78.4 923.3,79.8 925.5,81.9 927.8,77.2 930.0,80.3" stroke="var(--team-q-learner)"/><circle class="end-dot" cx="930.0" cy="80.3" r="4.5" fill="var(--team-q-learner)"/><rect class="label-swatch" x="938.0" y="78.8" width="7" height="7" rx="2" fill="var(--team-q-learner)"/><text class="series-label" x="950.0" y="84.3">Q-Learner</text><rect class="label-swatch" x="938.0" y="93.5" width="7" height="7" rx="2" fill="var(--team-trend-rider)"/><text class="series-label" x="950.0" y="99.0">Trend Rider</text><rect class="label-swatch" x="938.0" y="116.2" width="7" height="7" rx="2" fill="var(--team-benchmark)"/><text class="series-label" x="950.0" y="121.7">Buy &amp; Hold (benchmark)</text><rect class="label-swatch" x="938.0" y="138.0" width="7" height="7" rx="2" fill="var(--team-vol-breakout)"/><text class="series-label" x="950.0" y="143.5">Vol Breakout</text><text class="ref-label" x="938.0" y="159.4">start $5,000</text><rect class="label-swatch" x="938.0" y="167.8" width="7" height="7" rx="2" fill="var(--team-news-hound)"/><text class="series-label" x="950.0" y="173.3">News Hound</text><line id="crosshair" class="crosshair" x1="0" y1="18" x2="0" y2="342" style="display:none"/><rect id="hover-target" x="68" y="18" width="862" height="324" fill="transparent"/></svg><div id="tooltip" class="tooltip" hidden></div><script id="chart-data" type="application/json">{"n": 388, "padL": 68, "padR": 150, "w": 1080, "stamps": ["2026-10-05T13:31:54.796383+00:00", "2026-10-05T13:37:00.326880+00:00", "2026-10-05T13:42:19.984682+00:00", "2026-10-05T13:47:28.467174+00:00", "2026-10-05T13:52:30.369748+00:00", "2026-10-05T13:57:46.791366+00:00", "2026-10-05T14:03:15.038855+00:00", "2026-10-05T14:08:33.041608+00:00", "2026-10-05T14:13:46.835045+00:00", "2026-10-05T14:19:05.262170+00:00", "2026-10-05T14:24:29.359124+00:00", "2026-10-05T14:29:46.926113+00:00", "2026-10-05T14:35:00.573486+00:00", "2026-10-05T14:40:21.739784+00:00", "2026-10-05T14:45:29.322825+00:00", "2026-10-05T14:50:52.752717+00:00", "2026-10-05T23:18:47.853044+00:00", "2026-10-05T23:34:44.975804+00:00", "2026-10-05T23:49:51.647540+00:00", "2026-10-06T00:04:58.595120+00:00", "2026-10-06T00:20:05.025336+00:00", "2026-10-06T00:35:12.047284+00:00", "2026-10-06T00:50:18.597926+00:00", "2026-10-06T01:05:26.081581+00:00", "2026-10-06T01:20:32.851258+00:00", "2026-10-06T01:35:39.141751+00:00", "2026-10-06T01:50:45.991095+00:00", "2026-10-06T02:05:53.559989+00:00", "2026-10-06T02:21:00.006683+00:00", "2026-10-06T02:36:06.762384+00:00", "2026-10-06T02:51:13.690367+00:00", "2026-10-06T03:06:20.064365+00:00", "2026-10-06T03:21:26.577614+00:00", "2026-10-06T03:36:33.411600+00:00", "2026-10-06T03:51:39.733186+00:00", "2026-10-06T04:06:46.140772+00:00", "2026-10-06T04:22:09.907205+00:00", "2026-10-06T04:37:16.290958+00:00", "2026-10-06T04:53:56.079671+00:00", "2026-10-06T05:09:50.200133+00:00", "2026-10-06T05:24:56.685822+00:00", "2026-10-06T05:40:03.238587+00:00", "2026-10-06T05:55:10.269902+00:00", "2026-10-06T06:10:16.631873+00:00", "2026-10-06T06:25:23.177765+00:00", "2026-10-06T06:40:29.732776+00:00", "2026-10-06T06:55:36.119867+00:00", "2026-10-06T07:10:42.574926+00:00", "2026-10-06T07:25:49.404551+00:00", "2026-10-06T07:40:56.543119+00:00", "2026-10-06T07:56:03.021701+00:00", "2026-10-06T08:11:09.717148+00:00", "2026-10-06T08:26:16.477696+00:00", "2026-10-06T08:41:23.489180+00:00", "2026-10-06T08:56:30.381591+00:00", "2026-10-06T09:11:37.124300+00:00", "2026-10-06T09:26:44.415682+00:00", "2026-10-06T09:41:51.458658+00:00", "2026-10-06T09:56:58.567343+00:00", "2026-10-06T10:12:05.329840+00:00", "2026-10-06T10:28:43.580813+00:00", "2026-10-06T10:44:39.478029+00:00", "2026-10-06T10:59:42.254484+00:00", "2026-10-06T11:14:44.125386+00:00", "2026-10-06T11:29:45.971783+00:00", "2026-10-06T11:44:47.945109+00:00", "2026-10-06T11:59:49.858246+00:00", "2026-10-06T12:14:51.648491+00:00", "2026-10-06T12:29:53.702644+00:00", "2026-10-06T12:44:55.600062+00:00", "2026-10-06T12:59:57.457784+00:00", "2026-10-06T13:14:59.659264+00:00", "2026-10-06T13:30:01.960334+00:00", "2026-10-06T13:35:02.621206+00:00", "2026-10-06T13:40:05.388582+00:00", "2026-10-06T13:45:24.071645+00:00", "2026-10-06T13:50:42.245421+00:00", "2026-10-06T13:55:46.219639+00:00", "2026-10-06T14:01:01.836394+00:00", "2026-10-06T14:06:17.772261+00:00", "2026-10-06T14:11:27.480656+00:00", "2026-10-06T14:16:53.042428+00:00", "2026-10-06T14:22:18.843852+00:00", "2026-10-06T14:27:41.851597+00:00", "2026-10-06T14:32:55.025429+00:00", "2026-10-06T14:38:05.739287+00:00", "2026-10-06T14:43:19.068565+00:00", "2026-10-06T14:48:31.977952+00:00", "2026-10-06T14:53:34.733785+00:00", "2026-10-06T14:58:35.166602+00:00", "2026-10-06T15:03:54.249155+00:00", "2026-10-06T15:09:11.804299+00:00", "2026-10-06T15:14:16.909841+00:00", "2026-10-06T15:19:31.510394+00:00", "2026-10-06T15:24:40.820787+00:00", "2026-10-06T15:29:45.516487+00:00", "2026-10-06T15:34:49.777807+00:00", "2026-10-06T15:40:03.782195+00:00", "2026-10-06T15:45:09.752495+00:00", "2026-10-06T15:50:19.833397+00:00", "2026-10-06T15:55:26.614100+00:00", "2026-10-06T15:59:43.788539+00:00", "2026-10-06T16:04:57.399082+00:00", "2026-10-06T16:10:20.624270+00:00", "2026-10-06T16:15:36.850723+00:00", "2026-10-06T16:20:50.247804+00:00", "2026-10-06T16:25:55.765097+00:00", "2026-10-06T16:30:58.302739+00:00", "2026-10-06T16:36:33.910343+00:00", "2026-10-06T16:41:44.423498+00:00", "2026-10-06T16:47:18.648721+00:00", "2026-10-06T16:52:28.548229+00:00", "2026-10-06T16:57:28.998358+00:00", "2026-10-06T17:02:53.877613+00:00", "2026-10-06T17:08:13.073338+00:00", "2026-10-06T17:13:14.092774+00:00", "2026-10-06T17:18:31.914154+00:00", "2026-10-06T17:23:40.449416+00:00", "2026-10-06T17:28:45.722843+00:00", "2026-10-06T17:34:05.976711+00:00", "2026-10-06T17:39:22.745901+00:00", "2026-10-06T17:44:33.154420+00:00", "2026-10-06T17:49:39.608420+00:00", "2026-10-06T17:54:46.949319+00:00", "2026-10-06T17:59:57.201534+00:00", "2026-10-06T18:05:07.833866+00:00", "2026-10-06T18:10:20.478006+00:00", "2026-10-06T18:15:40.171120+00:00", "2026-10-06T18:21:01.495107+00:00", "2026-10-06T18:26:15.876863+00:00", "2026-10-06T18:32:00.396950+00:00", "2026-10-06T18:37:10.458150+00:00", "2026-10-06T18:42:44.166898+00:00", "2026-10-06T18:47:54.903315+00:00", "2026-10-06T18:52:56.193771+00:00", "2026-10-06T18:58:07.910160+00:00", "2026-10-06T19:03:34.554525+00:00", "2026-10-06T19:08:46.364892+00:00", "2026-10-06T19:13:54.826713+00:00", "2026-10-06T19:19:16.966448+00:00", "2026-10-06T19:24:54.155134+00:00", "2026-10-06T19:30:05.421159+00:00", "2026-10-06T19:35:26.967482+00:00", "2026-10-06T19:40:41.193806+00:00", "2026-10-06T19:46:08.350077+00:00", "2026-10-06T19:51:28.136715+00:00", "2026-10-06T19:56:37.443552+00:00", "2026-10-06T20:15:13.083033+00:00", "2026-10-06T20:30:19.576538+00:00", "2026-10-06T20:45:27.437669+00:00", "2026-10-06T21:00:34.061680+00:00", "2026-10-06T21:15:40.416854+00:00", "2026-10-06T21:32:15.828025+00:00", "2026-10-06T21:48:15.932046+00:00", "2026-10-06T22:03:18.877437+00:00", "2026-10-06T22:18:21.012992+00:00", "2026-10-06T22:33:23.138577+00:00", "2026-10-06T22:48:25.232002+00:00", "2026-10-06T23:03:27.232184+00:00", "2026-10-06T23:18:29.516788+00:00", "2026-10-06T23:33:31.404919+00:00", "2026-10-06T23:48:33.865334+00:00", "2026-10-07T00:03:35.969515+00:00", "2026-10-07T00:18:37.835782+00:00", "2026-10-07T00:33:39.797136+00:00", "2026-10-07T00:48:42.443455+00:00", "2026-10-07T01:03:44.501052+00:00", "2026-10-07T01:18:47.229999+00:00", "2026-10-07T01:33:49.473248+00:00", "2026-10-07T01:48:51.547453+00:00", "2026-10-07T02:03:53.813668+00:00", "2026-10-07T02:18:56.219192+00:00", "2026-10-07T02:33:58.271171+00:00", "2026-10-07T02:49:00.254774+00:00", "2026-10-07T03:05:27.532786+00:00", "2026-10-07T03:20:48.405642+00:00", "2026-10-07T03:35:53.088895+00:00", "2026-10-07T03:50:57.469149+00:00", "2026-10-07T04:06:01.882640+00:00", "2026-10-07T04:21:22.940551+00:00", "2026-10-07T04:36:27.395022+00:00", "2026-10-07T04:51:31.534850+00:00", "2026-10-07T05:06:35.807161+00:00", "2026-10-07T05:21:40.302906+00:00", "2026-10-07T05:36:44.431413+00:00", "2026-10-07T05:51:48.601598+00:00", "2026-10-07T06:06:52.745005+00:00", "2026-10-07T06:21:56.865910+00:00", "2026-10-07T06:37:01.066757+00:00", "2026-10-07T06:52:05.114664+00:00", "2026-10-07T07:07:09.178971+00:00", "2026-10-07T07:22:13.248413+00:00", "2026-10-07T07:37:17.233381+00:00", "2026-10-07T07:52:21.236004+00:00", "2026-10-07T08:07:25.363746+00:00", "2026-10-07T08:22:30.339443+00:00", "2026-10-07T08:39:09.587739+00:00", "2026-10-07T08:55:05.698182+00:00", "2026-10-07T09:10:12.078984+00:00", "2026-10-07T09:25:18.471184+00:00", "2026-10-07T09:40:25.145130+00:00", "2026-10-07T09:55:31.476634+00:00", "2026-10-07T10:10:37.555218+00:00", "2026-10-07T10:25:43.693579+00:00", "2026-10-07T10:40:50.220528+00:00", "2026-10-07T10:55:56.360049+00:00", "2026-10-07T11:11:03.272419+00:00", "2026-10-07T11:26:09.831691+00:00", "2026-10-07T11:41:16.142277+00:00", "2026-10-07T11:56:22.449046+00:00", "2026-10-07T12:11:29.066465+00:00", "2026-10-07T12:26:35.624168+00:00", "2026-10-07T12:41:41.958584+00:00", "2026-10-07T12:56:48.931676+00:00", "2026-10-07T13:11:55.610209+00:00", "2026-10-07T13:27:02.330665+00:00", "2026-10-07T13:32:18.676968+00:00", "2026-10-07T13:37:48.172465+00:00", "2026-10-07T13:42:56.915926+00:00", "2026-10-07T13:48:11.100640+00:00", "2026-10-07T13:53:17.548868+00:00", "2026-10-07T13:58:36.324150+00:00", "2026-10-07T14:03:56.993252+00:00", "2026-10-07T14:10:22.748939+00:00", "2026-10-07T14:15:48.295579+00:00", "2026-10-07T14:21:05.577602+00:00", "2026-10-07T14:26:13.067632+00:00", "2026-10-07T14:31:29.084617+00:00", "2026-10-07T14:36:42.983998+00:00", "2026-10-07T14:41:50.979334+00:00", "2026-10-07T14:47:05.594935+00:00", "2026-10-07T14:52:50.880002+00:00", "2026-10-07T14:57:51.684302+00:00", "2026-10-07T15:02:57.803766+00:00", "2026-10-07T15:08:12.306781+00:00", "2026-10-07T15:13:36.992941+00:00", "2026-10-07T15:19:00.070622+00:00", "2026-10-07T15:24:17.519529+00:00", "2026-10-07T15:29:20.034636+00:00", "2026-10-07T15:34:48.945629+00:00", "2026-10-07T15:39:57.282326+00:00", "2026-10-07T15:45:23.747127+00:00", "2026-10-07T15:50:45.835018+00:00", "2026-10-07T15:55:50.541909+00:00", "2026-10-07T16:01:05.008318+00:00", "2026-10-07T16:06:22.241241+00:00", "2026-10-07T16:11:36.025034+00:00", "2026-10-07T16:16:49.779459+00:00", "2026-10-07T16:22:25.441852+00:00", "2026-10-07T16:27:46.786917+00:00", "2026-10-07T16:33:32.804079+00:00", "2026-10-07T16:38:44.070601+00:00", "2026-10-07T16:44:11.951507+00:00", "2026-10-07T16:49:41.628615+00:00", "2026-10-07T16:54:48.985505+00:00", "2026-10-07T17:00:11.418513+00:00", "2026-10-07T17:05:20.578032+00:00", "2026-10-07T17:10:30.898950+00:00", "2026-10-07T17:15:44.366499+00:00", "2026-10-07T17:20:52.174352+00:00", "2026-10-07T17:25:55.526198+00:00", "2026-10-07T17:31:03.508732+00:00", "2026-10-07T17:36:24.861648+00:00", "2026-10-07T17:41:45.409201+00:00", "2026-10-07T17:46:55.284120+00:00", "2026-10-07T17:52:06.643640+00:00", "2026-10-07T17:57:07.635963+00:00", "2026-10-07T18:02:24.072862+00:00", "2026-10-07T18:07:36.008675+00:00", "2026-10-07T18:12:46.100366+00:00", "2026-10-07T18:18:08.909209+00:00", "2026-10-07T18:23:13.711074+00:00", "2026-10-07T18:28:25.294773+00:00", "2026-10-07T18:33:25.852397+00:00", "2026-10-07T18:38:43.465544+00:00", "2026-10-07T18:43:45.979124+00:00", "2026-10-07T18:48:56.002944+00:00", "2026-10-07T18:54:26.105524+00:00", "2026-10-07T18:59:33.994191+00:00", "2026-10-07T19:04:57.833803+00:00", "2026-10-07T19:10:16.477332+00:00", "2026-10-07T19:15:24.051970+00:00", "2026-10-07T19:20:42.262355+00:00", "2026-10-07T19:25:57.922676+00:00", "2026-10-07T19:31:25.868755+00:00", "2026-10-07T19:36:52.680766+00:00", "2026-10-08T01:38:42.909336+00:00", "2026-10-08T01:54:50.800425+00:00", "2026-10-08T02:09:57.802272+00:00", "2026-10-08T02:25:05.344882+00:00", "2026-10-08T02:40:12.204187+00:00", "2026-10-08T02:55:19.257457+00:00", "2026-10-08T03:10:26.610019+00:00", "2026-10-08T03:25:33.957079+00:00", "2026-10-08T03:40:40.696345+00:00", "2026-10-08T03:55:47.776128+00:00", "2026-10-08T04:10:54.693747+00:00", "2026-10-08T04:26:23.011218+00:00", "2026-10-08T04:41:29.790716+00:00", "2026-10-08T04:56:36.521896+00:00", "2026-10-08T05:11:43.430016+00:00", "2026-10-08T05:26:50.384017+00:00", "2026-10-08T05:41:57.424057+00:00", "2026-10-08T05:57:04.736615+00:00", "2026-10-08T06:12:11.648993+00:00", "2026-10-08T06:27:18.539195+00:00", "2026-10-08T06:42:25.432935+00:00", "2026-10-08T06:57:32.868161+00:00", "2026-10-09T12:18:56.393238+00:00", "2026-10-09T12:35:02.847158+00:00", "2026-10-09T12:50:08.302694+00:00", "2026-10-09T13:05:13.668138+00:00", "2026-10-09T13:20:19.030505+00:00", "2026-10-09T13:30:05.311090+00:00", "2026-10-09T13:35:12.763785+00:00", "2026-10-09T13:40:28.105606+00:00", "2026-10-09T13:45:32.909041+00:00", "2026-10-09T13:50:45.427798+00:00", "2026-10-09T13:55:56.924840+00:00", "2026-10-09T14:01:10.424658+00:00", "2026-10-09T14:06:27.513170+00:00", "2026-10-09T14:11:50.303470+00:00", "2026-10-09T14:17:08.483663+00:00", "2026-10-09T14:22:45.393007+00:00", "2026-10-09T14:27:50.850360+00:00", "2026-10-09T14:32:51.477212+00:00", "2026-10-09T14:37:54.244067+00:00", "2026-10-09T14:43:10.559320+00:00", "2026-10-09T14:48:25.509676+00:00", "2026-10-09T14:53:32.031895+00:00", "2026-10-09T14:58:50.219448+00:00", "2026-10-09T15:04:02.978675+00:00", "2026-10-09T15:09:14.058815+00:00", "2026-10-09T15:14:15.593783+00:00", "2026-10-09T15:19:29.626891+00:00", "2026-10-09T15:24:39.171406+00:00", "2026-10-09T15:29:46.175681+00:00", "2026-10-09T15:34:53.024908+00:00", "2026-10-09T15:40:11.633328+00:00", "2026-10-09T15:45:32.987647+00:00", "2026-10-09T15:50:56.673779+00:00", "2026-10-09T15:55:57.064039+00:00", "2026-10-09T16:01:14.375418+00:00", "2026-10-09T16:06:21.285089+00:00", "2026-10-09T16:11:33.179921+00:00", "2026-10-09T16:16:36.290567+00:00", "2026-10-09T16:21:56.036342+00:00", "2026-10-09T16:26:58.780722+00:00", "2026-10-09T16:32:18.063440+00:00", "2026-10-09T16:37:33.435000+00:00", "2026-10-09T16:42:50.136862+00:00", "2026-10-09T16:48:05.960987+00:00", "2026-10-09T16:53:19.062023+00:00", "2026-10-09T16:58:31.591123+00:00", "2026-10-09T17:03:41.694716+00:00", "2026-10-09T17:08:49.138968+00:00", "2026-10-09T17:14:05.971205+00:00", "2026-10-09T17:19:09.612888+00:00", "2026-10-09T17:24:14.454729+00:00", "2026-10-09T17:29:24.318560+00:00", "2026-10-09T17:34:38.752971+00:00", "2026-10-09T17:39:46.882924+00:00", "2026-10-09T17:45:08.920750+00:00", "2026-10-09T17:49:53.528872+00:00", "2026-10-09T17:54:55.045275+00:00", "2026-10-09T17:59:57.839560+00:00", "2026-10-09T18:05:12.409867+00:00", "2026-10-09T18:10:38.295380+00:00", "2026-10-09T18:16:00.183353+00:00", "2026-10-09T18:21:10.208718+00:00", "2026-10-09T18:26:32.485121+00:00", "2026-10-09T18:31:44.784996+00:00", "2026-10-09T18:36:58.261021+00:00", "2026-10-09T18:42:10.707603+00:00", "2026-10-09T18:47:14.691653+00:00", "2026-10-09T18:52:26.765665+00:00", "2026-10-09T18:57:40.328635+00:00", "2026-10-09T19:02:48.801890+00:00", "2026-10-09T19:07:57.047554+00:00", "2026-10-09T19:13:17.649554+00:00", "2026-10-09T19:18:25.359042+00:00", "2026-10-09T19:23:36.298015+00:00", "2026-10-09T19:29:01.091085+00:00", "2026-10-09T19:34:09.956836+00:00", "2026-10-09T19:39:23.971556+00:00", "2026-10-09T19:44:43.658301+00:00", "2026-10-09T19:49:55.006235+00:00", "2026-10-09T19:50:12.678928+00:00"], "series": [{"key": "mean_reverter", "name": "Mean Reverter", "curve": [5000.0, 5007.8125, 4995.45519, 5033.440833, 5031.486208, 5012.654395, 4998.417207, 5008.971107, 5024.380875, 5076.687825, 5057.414343, 5018.283801, 5027.217164, 5041.686773, 5015.921968, 5044.114928, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5017.45166, 5045.444326, 5062.559344, 5065.585941, 5066.267592, 5071.82055, 5000.196766, 5065.241903, 5030.324085, 5067.215848, 5063.21722, 5070.306691, 5029.164233, 4997.099565, 5001.274881, 5048.718881, 5051.05041, 5042.99599, 5052.091796, 5054.185565, 5062.454141, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5058.024042, 5056.111755, 5054.836896, 5052.28718, 5053.562038, 5051.012322, 5053.562038, 5056.111755, 5057.386613, 5053.562038, 5053.562038, 5049.737464, 5049.737464, 5049.737464, 5047.939654, 5050.725757, 5048.145897, 5045.808236, 5039.797416, 5078.998067, 5078.998067, 5078.998067, 5078.998067, 5078.998067, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5080.402071, 5024.945738, 5019.208876, 5026.220596, 5024.308309, 5024.945738, 4957.996307, 4958.076268, 4981.727112, 4968.931079, 4923.817524, 4948.977264, 4971.953825, 4944.254203, 4951.61972, 4952.488075, 4959.442185, 4965.977181, 4964.80434, 4961.830524, 4958.232138, 4958.789931, 4962.630378, 4963.910527, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341, 4962.310341], "baseline": 5000.0, "scored": true}, {"key": "news_hound", "name": "News Hound", "curve": [5000.0, 5007.832725, 4995.458537, 4995.646054, 4999.466672, 5003.518776, 5007.53184, 5006.719934, 5017.03527, 5009.271942, 5013.740379, 5009.930443, 4990.629714, 5003.021945, 5004.329157, 5010.191276, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 5010.580674, 4982.101561, 4988.011174, 5014.296792, 5015.415184, 5003.326406, 5007.971427, 4996.272561, 5011.446768, 5009.948164, 4992.978451, 4989.142867, 4988.635108, 4994.746591, 5003.847439, 4999.525862, 5000.077954, 5007.951454, 5009.553681, 5012.154887, 5007.851793, 5005.55529, 4998.600652, 5001.454284, 5001.389046, 4990.938567, 4987.158942, 4986.878242, 4985.847703, 4984.327017, 5022.723926, 5023.540447, 4975.199169, 4970.476228, 4967.039973, 4968.621023, 4965.935135, 4966.257556, 4970.301467, 4967.192382, 4963.300983, 4960.103648, 4968.532164, 4963.783758, 4984.711784, 4953.001944, 4956.969673, 4955.633388, 4965.060228, 4991.525403, 4992.308011, 4966.131345, 4967.741951, 4968.713531, 4966.765997, 4966.961484, 4968.435437, 4961.887108, 4965.67741, 4964.675167, 4963.959925, 4964.448325, 4962.965996, 4964.102767, 4962.414121, 4957.35669, 4958.463959, 4955.675328, 4953.165917, 4953.215405, 4954.245331, 4953.544116, 4952.836608, 4953.078549, 4952.123653, 4942.433653, 4942.433653, 4942.433653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.438653, 4923.018653, 4923.018653, 4923.018653, 4923.018653, 4923.018653, 4937.223653, 4926.658653, 4923.718653, 4925.768653, 4940.138653, 4937.948653, 4937.128653, 4933.090368, 4943.597638, 4902.370994, 4913.246981, 4912.135285, 4929.373862, 4914.129362, 4903.978004, 4905.968966, 4906.311976, 4907.473905, 4903.439114, 4902.241799, 4904.49183, 4897.757137, 4898.802153, 4898.840312, 4903.462212, 4904.888481, 4906.806629, 4904.620159, 4906.941557, 4927.08443, 4903.067148, 4910.826989, 4903.314426, 4903.46317, 4903.193365, 4904.549939, 4903.935512, 4904.785361, 4907.347895, 4936.190045, 4908.091641, 4904.2349, 4898.323076, 4901.647449, 4928.681143, 4928.161323, 4892.36293, 4896.950624, 4928.686252, 4897.395214, 4895.77184, 4896.208159, 4926.668503, 4896.57903, 4868.363358, 4925.876321, 4897.78077, 4898.178048, 4931.625682, 4895.263867, 4897.947205, 4897.127707, 4897.947205, 4930.037699, 4899.020855, 4897.829057, 4898.288512, 4931.10062, 4902.205637, 4930.209658, 4897.838175, 4900.710265, 4900.710265, 4900.710265, 4900.710265, 4900.710265, 4900.710265, 4900.710265, 4900.710265, 4900.710265, 4900.710265, 4900.710265, 4900.710265, 4900.710265, 4900.710265, 4900.710265, 4900.710265, 4900.710265, 4900.710265, 4900.710265, 4900.710265, 4900.710265, 4900.710265, 4174.315349, 4174.315349, 4174.446098, 4172.354125, 4188.57106, 4860.631573, 4856.436856, 4858.186084, 4866.028034, 4864.782301, 4861.112876, 4858.592052, 4858.092052, 4858.529552, 4864.342037, 4861.550376, 4864.300371, 4856.362887, 4859.112882, 4857.279553, 4860.925378, 4859.071215, 4856.404555, 4864.154538, 4859.029549, 4859.967047, 4857.779552, 4857.279553, 4841.799237, 4842.97209, 4861.20461, 4862.946117, 4861.964525, 4863.110669, 4860.297406, 4863.269223, 4863.269221, 4863.269224, 4863.269222, 4863.269221, 4863.269222, 4863.269222, 4863.269222, 4863.269223, 4863.269223, 4863.269221, 4863.269222, 4863.269222, 4863.26922, 4863.269219, 4863.26922, 4863.269219, 4863.269219, 4863.269219, 4863.269222, 4863.269222, 4863.269222, 4862.071618, 4859.829902, 4857.14054, 4859.531082, 4857.887585, 4855.048815, 4852.210045, 4852.210046, 4851.612409, 4852.658273, 4851.911226, 4858.335813, 4849.520684, 4845.785461, 4843.0961, 4840.24839, 4842.755635, 4843.173508, 4848.013879, 4843.591382, 4844.775356, 4845.436991, 4831.055166], "baseline": 5000.0, "scored": true}, {"key": "q_learner", "name": "Q-Learner", "curve": [5000.0, 4984.390798, 5037.569516, 5013.233745, 5024.561001, 5020.101001, 5032.837223, 5047.614535, 5046.574384, 5031.426338, 5031.029625, 5034.481048, 5064.281947, 5073.607915, 5041.534083, 5047.731658, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5073.298669, 5172.241772, 5254.24588, 5277.004377, 5315.14087, 5315.309078, 5339.676303, 5325.035019, 5301.225134, 5334.005246, 5361.25124, 5322.07344, 5322.252006, 5290.964517, 5318.548378, 5326.228291, 5307.231295, 5358.779679, 5355.784093, 5310.913682, 5375.248011, 5369.124461, 5382.151588, 5375.712928, 5333.106397, 5339.150321, 5398.894353, 5393.136702, 5344.570783, 5344.200349, 5389.455363, 5387.153083, 5369.175495, 5334.698763, 5314.130495, 5361.066162, 5345.015877, 5357.795123, 5311.513576, 5315.252344, 5356.941742, 5361.364689, 5318.625555, 5320.168688, 5369.471794, 5328.154403, 5338.261925, 5292.276556, 5337.118887, 5296.657246, 5295.199079, 5311.198547, 5332.193908, 5310.434756, 5341.469616, 5393.145109, 5353.945822, 5355.040474, 5337.363766, 5341.737495, 5320.723374, 5341.473106, 5350.281459, 5295.519089, 5350.518018, 5309.51477, 5354.358627, 5355.694029, 5382.265527, 5299.874884, 5327.440547, 5325.079872, 5287.699597, 5362.402123, 5329.431735, 5367.220738, 5340.658029, 5341.553902, 5341.873857, 5341.916517, 5341.916517, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5341.916518, 5279.002644, 5269.985528, 5253.460235, 5252.249023, 5237.250198, 5232.121617, 5233.928808, 5244.390985, 5222.196036, 5218.016375, 5255.74908, 5234.337027, 5255.975299, 5214.069571, 5259.876218, 5263.390396, 5217.970006, 5220.986008, 5255.758684, 5240.487253, 5237.672386, 5248.476691, 5254.573003, 5252.8453, 5250.90315, 5281.339865, 5286.313637, 5289.065525, 5280.525019, 5298.756612, 5322.791631, 5303.415837, 5292.296876, 5293.091769, 5282.708584, 5288.930035, 5286.867951, 5269.71375, 5269.2754, 5232.181059, 5233.265527, 5243.75072, 5275.078044, 5253.531505, 5280.85003, 5249.926896, 5244.159936, 5273.818576, 5295.368625, 5254.20763, 5238.843144, 5274.803746, 5277.60881, 5287.875124, 5282.431179, 5287.603687, 5298.001213, 5309.363359, 5302.524152, 5279.888967, 5293.042105, 5293.003517, 5293.756912, 5289.449985, 5286.373864, 5297.590017, 5294.938708, 5295.657588, 5297.750236, 5300.689746, 5300.077518, 5292.636829, 5292.636829, 5292.636829, 5292.636829, 5292.636829, 5292.636829, 5292.636829, 5292.636829, 5292.636829, 5292.636829, 5292.636829, 5292.636829, 5292.636829, 5292.636829, 5292.636829, 5292.636829, 5292.636829, 5292.636829, 5292.636829, 5292.636829, 5292.636829, 5292.636829, 5173.794362, 5173.794362, 5173.794362, 5173.794362, 5197.205583, 5187.838816, 5134.70794, 5142.388556, 5131.19647, 5135.405136, 5159.685219, 5151.971431, 5162.174011, 5138.451704, 5144.436617, 5138.947468, 5138.331608, 5138.129313, 5164.619656, 5139.018993, 5147.207348, 5160.982662, 5150.6829, 5163.291525, 5150.708744, 5151.746327, 5155.355714, 5162.869857, 5136.580621, 5147.703098, 5155.023666, 5148.731259, 5129.034436, 5142.52516, 5137.892682, 5146.156129, 5160.392868, 5167.136932, 5141.586504, 5173.237088, 5159.961604, 5200.074046, 5192.170511, 5194.550829, 5195.948837, 5225.970598, 5196.025091, 5176.977514, 5184.439761, 5218.13508, 5180.576767, 5220.635457, 5207.372608, 5187.663524, 5174.817286, 5189.947561, 5190.267516, 5190.348762, 5190.242111, 5200.67263, 5167.46128, 5212.11193, 5188.625666, 5211.018597, 5210.058734, 5209.610797, 5211.146579, 5210.847955, 5210.122725, 5210.528, 5193.793637, 5205.507646, 5189.645983, 5198.967326, 5199.543245, 5216.430458, 5210.560498, 5201.708422, 5221.448422, 5208.160688], "baseline": 5000.0, "scored": true}, {"key": "stat_arb", "name": "Stat Arb", "curve": [5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.0, 5000.397953, 4998.408186, 4999.40307, 5003.780557, 5001.094372, 4998.507675, 4998.905628, 5002.188744, 4996.617396, 4996.716885, 4996.41842, 4995.722001, 4996.020466, 4996.318931, 5000.795907, 5000.298465, 5000.497442, 5000.397953, 5002.885162, 5002.188744, 5004.576464, 5000.298465, 5000.795907, 4998.607163, 4999.801023, 5001.19386, 4995.920978, 4995.125071, 4994.926094, 4998.706651, 4992.639372, 5003.272682, 4993.808919, 4994.558009, 5002.923354, 4992.724766, 5002.714244, 4996.289784, 4964.929026, 4974.261152, 4973.796262, 4973.171144, 4977.888229], "baseline": 5000.0, "scored": true}, {"key": "gambler", "name": "The Gambler", "curve": [5000.0, 4996.653515, 4996.653515, 4996.653515, 5002.835013, 4960.230871, 4996.53315, 5010.818532, 5010.818532, 5010.81854, 5010.818537, 5010.818537, 5010.818536, 5010.818536, 5010.818536, 5010.818536, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818534, 5010.818539, 5041.86079, 5003.884164, 5013.748411, 5091.019901, 5097.29171, 5053.758312, 5053.758303, 5053.758308, 5053.758309, 5053.758308, 5043.797653, 5040.106875, 5091.733306, 5096.002158, 5079.549291, 5083.506872, 5086.30831, 5091.733311, 5091.733311, 5101.115893, 5094.179008, 5081.55032, 5093.956672, 5096.980442, 5041.529825, 5053.758314, 5053.758308, 5075.547237, 5070.611381, 5048.734108, 5036.65985, 5042.510821, 5038.921417, 5031.343805, 5037.326135, 5040.676239, 5043.627522, 5040.117889, 5040.436946, 5029.26993, 5020.256553, 5039.958356, 5031.423565, 5031.742622, 5025.36147, 5020.256549, 5020.8149, 5031.583094, 5034.77367, 5031.3438, 5015.949271, 5018.581496, 5030.865214, 5023.287596, 5030.147334, 5015.869507, 5011.721758, 5011.4027, 5015.451577, 5000.067402, 4991.977447, 4991.977449, 4991.977447, 4991.977447, 4991.977447, 4991.977447, 4991.977447, 4996.850619, 4997.304637, 4987.992885, 4985.745269, 4985.745269, 4983.49765, 4987.992888, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4970.011956, 4913.821546, 4898.08823, 4900.335847, 4900.335847, 4902.583463, 4902.583456, 4895.840612, 4894.984198, 4892.438209, 4891.306663, 4891.023771, 4903.470826, 4898.944624, 4893.003988, 4891.871484, 4892.986477, 4893.776594, 4892.752813, 4891.631828, 4896.368304, 4891.145587, 4889.316943, 4889.150257, 4889.424799, 4889.979912, 4889.257954, 4892.722446, 4893.217602, 4892.871878, 4890.42483, 4893.321274, 4892.287921, 4900.228457, 4906.407059, 4915.713127, 4889.50038, 4888.759858, 4888.377361, 4888.262612, 4888.339111, 4887.497617, 4886.388376, 4886.388376, 4886.388376, 4898.855349, 4893.559068, 4883.995174, 4885.141882, 4884.912976, 4871.954549, 4881.233304, 4879.756428, 4880.38104, 4879.923866, 4863.502367, 4883.507576, 4888.076956, 4874.445266, 4875.235514, 4886.99347, 4906.989963, 4869.017581, 4875.861046, 4875.834611, 4874.424126, 4875.843263, 4875.749224, 4888.738193, 4914.623189, 4867.305758, 4866.885968, 4795.26495, 4865.480557, 4863.495201, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4866.448542, 4869.645847, 4865.860661, 4826.718698, 4868.176119, 4869.490006, 4869.77469, 4869.456566, 4871.359885, 4870.573976, 4867.661517, 4868.264326, 4869.036859, 4869.829457, 4869.016795, 4868.407299, 4870.547224, 4871.549675, 4870.032622, 4869.734562, 4869.138442, 4869.030171, 4866.632314, 4866.83548, 4866.225984, 4866.34763, 4866.036194, 4864.288121, 4865.591737, 4859.411507, 4852.026953, 4866.931055, 4871.253943, 4859.709567, 4856.818996, 4856.818996, 4856.520935, 4863.307965, 4863.606025, 4864.798266, 4865.692446, 4865.096326, 4865.096326, 4865.096326, 4865.096326, 4864.798266, 4844.388317, 4818.241147, 4879.537596, 4880.856457, 4878.508647, 4880.860532, 4878.945551, 4876.450747, 4873.363898, 4873.363898, 4873.065838, 4873.960019, 4874.258079, 4874.258079, 4873.960019, 4873.661958, 4865.880103, 4855.129991, 4848.520071, 4850.23654, 4880.296226, 4870.63402, 4870.0379, 4874.777624, 4874.777624], "baseline": 5000.0, "scored": true}, {"key": "scalper", "name": "The Scalper", "curve": [5000.0, 5001.230356, 5001.394794, 5019.233455, 5017.923489, 5014.969817, 5019.37296, 5023.016074, 5010.520483, 5008.445346, 5018.933876, 5022.856539, 5018.147644, 5019.841141, 5016.662097, 5021.903183, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5016.141678, 5080.498861, 5085.26062, 5097.867144, 5096.695314, 5101.852489, 5090.399295, 5090.365382, 5073.04391, 5092.312702, 5098.284126, 5087.973089, 5087.568786, 5082.701518, 5091.157447, 5095.715251, 5090.479808, 5093.126538, 5092.904445, 5086.156781, 5086.13248, 5086.209291, 5083.004279, 5079.656172, 5083.061185, 5078.969646, 5084.160347, 5079.269775, 5082.884273, 5080.835195, 5079.086059, 5083.173586, 5074.93502, 5077.472522, 5070.12308, 5068.868948, 5063.180232, 5061.883621, 5063.070081, 5073.247518, 5079.711277, 5069.171767, 5068.053733, 5074.617338, 5068.007221, 5064.814172, 5062.277234, 5064.782148, 5061.276949, 5063.798234, 5068.980604, 5063.520963, 5059.964416, 5061.214092, 5067.384192, 5064.400341, 5067.486616, 5063.60603, 5056.247186, 5055.759016, 5051.786757, 5056.782229, 5056.575092, 5056.798245, 5052.670418, 5052.030015, 5045.092973, 5045.898967, 5045.97144, 5048.024397, 5054.455793, 5052.806128, 5046.671221, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5047.969731, 5044.84195, 5036.345177, 5032.543337, 5034.28421, 5043.052347, 5036.813991, 5042.973068, 5044.500656, 5046.592882, 5052.368847, 5053.113096, 5052.098732, 5053.960139, 5051.466414, 5044.309351, 5036.930884, 5038.175122, 5033.314269, 5042.232474, 5042.45153, 5039.979877, 5041.984754, 5038.977891, 5045.166711, 5044.912444, 5049.012725, 5047.230455, 5045.978705, 5040.852003, 5037.909901, 5038.699708, 5035.822189, 5032.027665, 5033.651721, 5032.048654, 5030.882883, 5030.965567, 5034.744278, 5026.754618, 5027.184295, 5035.883669, 5030.612102, 5028.274437, 5030.863994, 5028.829206, 5028.431618, 5027.332705, 5026.547538, 5025.899935, 5022.445516, 5022.804524, 5028.478809, 5033.131034, 5030.220127, 5027.744534, 5024.47331, 5027.503924, 5029.098834, 5029.627777, 5024.67132, 5021.66915, 5021.289184, 5020.743683, 5016.269127, 5017.850382, 5020.883505, 5021.537294, 5021.465821, 5021.231498, 5016.77335, 5025.054559, 5025.054559, 5025.054559, 5025.054559, 5025.054559, 5025.054559, 5025.054559, 5025.054559, 5025.054559, 5025.054559, 5025.054559, 5025.054559, 5025.054559, 5025.054559, 5025.054559, 5025.054559, 5025.054559, 5025.054559, 5025.054559, 5025.054559, 5025.054559, 5025.054559, 4203.969538, 4203.969538, 4204.103782, 4201.955872, 4251.667433, 4939.814824, 4935.939466, 4937.485696, 4932.752021, 4921.192252, 4919.916325, 4919.807831, 4915.834424, 4919.925276, 4918.221289, 4917.148635, 4918.387626, 4923.008471, 4926.282282, 4918.258615, 4918.478843, 4925.148194, 4922.6249, 4918.993834, 4910.189638, 4909.286934, 4915.172199, 4912.303945, 4910.988277, 4909.718621, 4910.206114, 4907.689921, 4911.772854, 4911.327929, 4902.424445, 4912.459472, 4906.421089, 4905.681075, 4905.644971, 4907.238049, 4905.576889, 4900.873118, 4899.515623, 4905.733829, 4907.045648, 4903.956329, 4904.706094, 4904.687355, 4903.033395, 4904.236168, 4902.138581, 4904.367903, 4901.082182, 4901.526615, 4899.98381, 4901.906771, 4906.446091, 4901.409291, 4901.334437, 4904.349972, 4905.265422, 4906.49202, 4906.65237, 4902.65226, 4901.036085, 4898.263311, 4901.23756, 4900.397962, 4898.221685, 4898.982849, 4899.926106, 4900.944662, 4905.848678, 4908.24884, 4909.335248, 4900.599712, 4897.921623, 4900.560728, 4901.406492, 4901.406492], "baseline": 5000.0, "scored": true}, {"key": "trend_rider", "name": "Trend Rider", "curve": [5000.0, 5021.504699, 5024.553495, 4988.572887, 5004.148026, 5003.380758, 5015.676289, 5019.586303, 5022.774875, 5008.895341, 5004.066754, 5004.729697, 5009.035266, 5010.99745, 5007.51448, 5031.94687, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5031.976476, 5042.232331, 5045.456327, 5045.962153, 5048.878783, 5021.763134, 5028.199906, 5037.194833, 5028.441972, 5013.244435, 5011.960807, 4999.719957, 5015.098257, 4989.005455, 4978.317308, 4967.11277, 4967.879162, 4972.253152, 4981.675262, 4986.132981, 4981.788241, 4992.452917, 4960.677176, 4982.906325, 5003.221591, 5002.347163, 5003.698869, 5004.783852, 4994.649937, 4995.063864, 5006.130075, 5011.384711, 5011.279118, 4972.78056, 5000.207885, 4964.37284, 4993.437063, 4993.467296, 4994.178801, 4996.124186, 4993.819819, 4993.749544, 4994.164378, 4996.297505, 4997.823353, 4994.245565, 4993.447664, 4986.525805, 4949.411947, 4990.176458, 4995.196909, 4992.709077, 4980.408065, 4988.322993, 4983.278724, 4985.564694, 4985.614153, 4987.498752, 4986.950941, 4982.518293, 4984.500373, 4982.889097, 4982.204333, 4977.843875, 4975.591186, 4978.090761, 4982.717788, 4982.389614, 4983.22128, 4981.853585, 4976.450935, 4978.943981, 4977.49171, 4975.652959, 4966.153572, 4969.153351, 4966.781847, 4961.314408, 4961.35561, 4912.819901, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4957.606247, 4926.2062, 4947.868164, 4943.635057, 4946.809887, 4958.45093, 4954.217824, 4948.661871, 4947.810489, 4948.378077, 4951.783604, 4949.513252, 4947.810489, 4949.513252, 4948.945665, 4956.324306, 4957.877392, 4955.329916, 4950.234964, 4951.933281, 4951.084123, 4951.933281, 4958.726551, 4957.877392, 4962.647965, 4958.584963, 4961.226546, 4960.471066, 4965.139942, 4983.077985, 4960.190633, 4956.873004, 4950.920501, 4958.496219, 4956.269953, 4952.061934, 4947.323483, 4948.066727, 4947.660778, 4947.544083, 4948.640672, 4950.623288, 4952.357852, 4953.412076, 4956.02985, 4956.396438, 4957.888244, 4963.109867, 4955.277028, 4958.750412, 4959.988535, 4960.840801, 4960.611591, 4963.476397, 4964.753813, 4967.484138, 4968.687664, 4965.719569, 4963.714195, 4970.051178, 4973.450357, 4967.347167, 4967.275657, 4971.158281, 4970.276994, 4945.731976, 4980.980404, 5011.860868, 5018.192416, 5014.589449, 4955.917587, 4955.917587, 4955.917587, 4955.917587, 4955.917587, 4955.917587, 4955.917587, 4955.917587, 4955.917587, 4955.917587, 4955.917587, 4955.917587, 4955.917587, 4955.917587, 4955.917587, 4955.917587, 4955.917587, 4955.917587, 4955.917587, 4955.917587, 4955.917587, 4955.917587, 5006.107822, 5006.107822, 5006.107822, 5006.107822, 5035.74706, 5046.584289, 5108.743452, 5119.51974, 5102.487457, 5124.877858, 5115.479442, 5154.346331, 5163.418318, 5208.884496, 5195.154751, 5189.515144, 5209.329978, 5226.806558, 5229.876145, 5208.833302, 5140.687536, 5152.417614, 5155.084697, 5151.98767, 5150.252522, 5151.781515, 5148.8992, 5153.275408, 5158.33157, 5160.056764, 5152.97784, 5155.973305, 5161.776131, 5159.727922, 5160.643604, 5158.363235, 5164.222726, 5165.865062, 5162.75384, 5164.544431, 5163.303289, 5164.524524, 5170.684493, 5157.44111, 5154.874096, 5154.628823, 5155.326217, 5150.090459, 5147.896488, 5132.69151, 5131.462437, 5153.368759, 5146.966123, 5133.803757, 5170.747467, 5184.981038, 5129.464189, 5169.787368, 5169.27463, 5127.690855, 5138.417104, 5138.276127, 5147.952848, 5138.78753, 5144.581255, 5144.408762, 5152.93599, 5148.527617, 5153.360689, 5151.919225, 5158.689239, 5158.050948, 5151.193638, 5160.873748, 5153.022516, 5139.311773, 5139.915288, 5137.147315, 5155.312952, 5145.917103], "baseline": 5000.0, "scored": true}, {"key": "vol_breakout", "name": "Vol Breakout", "curve": [5000.0, 5000.625, 4982.979159, 4983.397368, 4989.203602, 4989.674418, 4985.686882, 4985.79888, 4986.314068, 4986.314068, 4988.800412, 4988.150826, 4986.090073, 4986.403666, 4985.149295, 4984.365313, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.870673, 4994.713877, 4990.973162, 4989.561994, 4996.259441, 4988.374821, 4988.822811, 4993.504304, 4989.337999, 4993.078714, 4991.958739, 4998.924981, 4997.62581, 4998.745785, 4997.558612, 5001.388925, 5001.635319, 5001.635319, 5000.627342, 5001.61292, 5001.299327, 5003.292881, 5001.523322, 5005.040042, 5003.449678, 5007.100795, 5005.644828, 5007.011197, 5002.688095, 5000.560144, 5001.657719, 5000.604943, 5001.254528, 5001.971311, 4999.731362, 4999.014579, 4999.193775, 5001.881713, 5002.217706, 5002.441701, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 4999.081777, 5004.34644, 5004.34644, 5004.34644, 5004.34644, 5004.34644, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4995.92356, 4949.285297, 5016.618351, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4986.483245, 4985.221012, 4984.358411, 4984.358411, 4984.358411, 4984.358411, 4984.358411, 4984.358411, 4984.358411, 4984.358411, 4984.358411, 4984.358411, 4984.358411, 4983.768887, 4981.3097, 4981.3097, 4981.3097, 4981.3097, 4981.741403, 4985.087097, 5024.836689, 4980.017689, 5016.712405, 4985.19812, 5017.196259, 4983.6202, 4984.825973, 4986.430048, 5018.424247, 4983.203307, 4971.443036, 4971.443036, 4971.443036, 4971.443036, 4971.443036, 4971.443036, 4971.443036, 4971.443036, 4971.443036, 4971.443036, 4971.443036, 4971.443036, 4971.443036, 4971.443036, 4971.443036, 4971.443036, 4971.443036, 4971.443036, 4971.443036, 4971.443036, 4971.443036, 4971.443036, 4924.798819, 4924.798819, 4924.798819, 4924.798819, 4992.179556, 4984.941608, 4994.009416, 4995.761674, 5017.481015, 5017.26297, 5010.183303, 5008.573114, 5003.271051, 4994.379684, 4997.102652, 4997.5791, 4997.608878, 4993.678177, 4995.405304, 4999.991122, 5001.658692, 5004.368494, 5005.887174, 5003.445374, 5002.790257, 5003.028482, 5003.147594, 5003.385818, 5003.236928, 5005.738283, 5006.24451, 5008.180083, 5008.864978, 5009.341426, 5009.28187, 5010.35388, 5010.085877, 5011.366333, 5011.485445, 5010.979218, 5009.073424, 5010.681438, 5011.008996, 5010.472992, 5012.259674, 5008.805422, 5007.167629, 5006.631625, 5005.887174, 5002.164919, 5002.730701, 5002.016028, 5003.802711, 5005.172501, 5007.376076, 5007.108073, 5007.524966, 5005.857395, 5008.954312, 5010.830328, 5006.774436, 5007.487608, 5006.594267, 5006.23693, 5006.832491, 5009.572071, 5008.797842, 5006.943532, 5005.303049, 5005.690163, 5007.149287, 5007.953295, 5007.339231, 5007.068537, 5007.812988, 5008.051212, 5012.160582, 5009.30189, 5012.160582, 5012.309472], "baseline": 5000.0, "scored": true}, {"key": "benchmark", "name": "Buy & Hold (benchmark)", "curve": [5000.0, 4998.68127, 4999.53849, 4997.824049, 4999.062257, 4998.776517, 5000.078222, 5003.697598, 5007.69796, 5010.491864, 5012.428548, 5011.603076, 5007.12648, 5009.380652, 5008.936168, 5009.952133, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5025.128112, 5048.273067, 5044.336202, 5042.463017, 5042.463017, 5042.463017, 5047.352349, 5047.161855, 5048.146072, 5050.971725, 5052.749663, 5054.337109, 5059.004199, 5056.654779, 5059.734424, 5059.924917, 5056.33729, 5053.797378, 5051.130469, 5054.337109, 5059.099445, 5056.33729, 5059.575679, 5059.956666, 5061.861601, 5062.46483, 5064.623756, 5067.068422, 5067.195418, 5066.52869, 5066.306448, 5067.258915, 5065.576223, 5066.115955, 5064.433262, 5065.95721, 5065.449227, 5063.734786, 5062.782319, 5062.306085, 5063.004561, 5060.369402, 5060.305904, 5059.289939, 5060.559895, 5060.464649, 5058.496216, 5057.162762, 5057.416753, 5055.988052, 5054.114867, 5052.813161, 5055.956303, 5056.686528, 5057.321507, 5057.448502, 5057.956485, 5057.670745, 5056.877022, 5058.68671, 5060.020164, 5059.512181, 5057.702493, 5057.607247, 5057.162762, 5056.019801, 5057.321507, 5058.559714, 5058.464467, 5058.908952, 5059.099445, 5057.448502, 5057.416753, 5056.464286, 5056.146797, 5056.400788, 5056.210295, 5056.305541, 5055.035585, 5054.432356, 5052.717915, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5054.01962, 5034.335296, 5030.525426, 5034.144802, 5033.859062, 5033.859062, 5032.811348, 5031.541392, 5027.064795, 5024.524882, 5021.127749, 5026.239324, 5024.080398, 5024.493134, 5021.603983, 5021.000753, 5026.239324, 5023.413671, 5023.191428, 5023.953402, 5023.477168, 5019.953039, 5018.365594, 5021.349991, 5020.111784, 5022.175463, 5026.969549, 5025.128112, 5024.239142, 5025.382103, 5026.493315, 5031.604889, 5033.255833, 5036.017988, 5034.906776, 5036.113235, 5036.017988, 5036.017988, 5036.113235, 5038.018169, 5037.319693, 5037.954671, 5036.367226, 5035.287763, 5035.827494, 5035.065521, 5034.557538, 5038.018169, 5040.462835, 5039.923104, 5042.336021, 5042.621761, 5041.859787, 5041.383554, 5041.034316, 5042.844004, 5040.939069, 5040.367589, 5040.081848, 5042.558263, 5041.923285, 5041.351805, 5041.605796, 5043.161493, 5043.066246, 5039.986602, 5041.605796, 5041.701043, 5042.36777, 5043.129744, 5040.685078, 5041.510549, 5039.637364, 5039.256377, 5040.526333, 5039.637364, 5039.288126, 5040.90732, 5040.90732, 5040.90732, 5040.90732, 5040.90732, 5040.90732, 5040.90732, 5040.90732, 5040.90732, 5040.90732, 5040.90732, 5040.90732, 5040.90732, 5040.90732, 5040.90732, 5040.90732, 5040.90732, 5040.90732, 5040.90732, 5040.90732, 5040.90732, 5040.90732, 5038.335658, 5037.573685, 5035.95449, 5035.95449, 5037.097451, 5032.112872, 5037.033953, 5035.66875, 5029.82695, 5032.46211, 5032.144621, 5032.398612, 5032.271617, 5031.827132, 5035.795746, 5034.875027, 5036.748213, 5034.906776, 5035.478256, 5033.319331, 5035.732248, 5039.383372, 5042.431268, 5041.637545, 5037.605433, 5040.399337, 5043.764722, 5042.36777, 5039.859606, 5038.811892, 5039.669113, 5038.526152, 5041.859787, 5041.923285, 5038.58965, 5043.54248, 5042.209025, 5044.653691, 5044.431449, 5045.002929, 5046.495128, 5045.86015, 5044.812436, 5046.876115, 5048.304816, 5047.161855, 5047.130106, 5046.717371, 5045.955397, 5044.145709, 5044.526696, 5046.241137, 5044.844185, 5046.018895, 5046.336384, 5046.653873, 5047.479344, 5047.828582, 5046.653873, 5049.320781, 5048.908045, 5049.63827, 5049.797015, 5049.416028, 5049.257283, 5049.289032, 5050.463742, 5051.670201, 5050.2415, 5051.924192, 5052.178183, 5052.051187, 5052.019439, 5052.940157, 5051.447958, 5051.670201, 5050.939976, 5049.320781, 5049.701768, 5049.860513], "baseline": 5000.0, "scored": false}]}</script></div><p class="axis-note">Horizontal axis is equity-snapshot order, not clock time — samples are taken during sessions only, so a time axis would draw a flat line across every night and weekend. Vertical rules mark session boundaries.</p>
+  </section>
+  <section class="panel"><h2>Standings</h2><table class="data"><thead><tr><th class="num">#</th><th>Team</th><th class="num">Equity</th><th class="num">Return</th><th class="num">P&amp;L</th><th class="num">Pos</th><th class="num">Fills</th><th class="num">Max DD</th><th class="num">Season pts</th></tr></thead><tbody><tr><td class="num">1</td><td><span class="swatch" style="background:var(--team-q-learner)"></span>Q-Learner</td><td class="num">$5,208.16</td><td class="num up">+4.16%</td><td class="num up">+208.16</td><td class="num">0</td><td class="num">93</td><td class="num">-5.00%</td><td class="num">26</td></tr><tr><td class="num">2</td><td><span class="swatch" style="background:var(--team-trend-rider)"></span>Trend Rider</td><td class="num">$5,145.92</td><td class="num up">+2.92%</td><td class="num up">+145.92</td><td class="num">0</td><td class="num">180</td><td class="num">-2.69%</td><td class="num">14</td></tr><tr><td class="num">3</td><td><span class="swatch" style="background:var(--team-vol-breakout)"></span>Vol Breakout</td><td class="num">$5,012.31</td><td class="num up">+0.25%</td><td class="num up">+12.31</td><td class="num">0</td><td class="num">47</td><td class="num">-1.99%</td><td class="num">13</td></tr><tr><td class="num">4</td><td><span class="swatch" style="background:var(--team-stat-arb)"></span>Stat Arb</td><td class="num">$4,977.89</td><td class="num down">-0.44%</td><td class="num down">-22.11</td><td class="num">0</td><td class="num">3</td><td class="num">-0.79%</td><td class="num">8</td></tr><tr><td class="num">5</td><td><span class="swatch" style="background:var(--team-mean-reverter)"></span>Mean Reverter</td><td class="num">$4,962.31</td><td class="num down">-0.75%</td><td class="num down">-37.69</td><td class="num">0</td><td class="num">33</td><td class="num">-3.08%</td><td class="num">9</td></tr><tr><td class="num">6</td><td><span class="swatch" style="background:var(--team-scalper)"></span>The Scalper</td><td class="num">$4,901.41</td><td class="num down">-1.97%</td><td class="num down">-98.59</td><td class="num">0</td><td class="num">994</td><td class="num">-17.64%</td><td class="num">10</td></tr><tr><td class="num">7</td><td><span class="swatch" style="background:var(--team-gambler)"></span>The Gambler</td><td class="num">$4,874.78</td><td class="num down">-2.50%</td><td class="num down">-125.22</td><td class="num">0</td><td class="num">187</td><td class="num">-6.00%</td><td class="num">11</td></tr><tr><td class="num">8</td><td><span class="swatch" style="background:var(--team-news-hound)"></span>News Hound</td><td class="num">$4,831.06</td><td class="num down">-3.38%</td><td class="num down">-168.94</td><td class="num">0</td><td class="num">343</td><td class="num">-16.94%</td><td class="num">17</td></tr><tr class="unscored"><td class="num">—</td><td><span class="swatch" style="background:var(--team-benchmark)"></span>Buy &amp; Hold (benchmark) <em>(unscored)</em></td><td class="num">$5,049.86</td><td class="num up">+1.00%</td><td class="num up">+49.86</td><td class="num">0</td><td class="num">3</td><td class="num">-0.96%</td><td class="num">0</td></tr></tbody></table></section>
+</section>
+
+<section class="panel-set hidden" id="tab-teams">
+  <div class="dossiers"><article class="dossier">
+  <header>
+    <span class="swatch" style="background:var(--team-q-learner)"></span>
+    <h3>Q-Learner</h3><span class="dossier-rank">#1</span>
+    <span class="dossier-ret up">+4.16%</span>
+  </header>
+  <p class="tagline">&ldquo;It doesn&#x27;t know what a stock is. It knows what worked.&rdquo;</p>
+  <p class="philosophy">Tabular Q-learning over a discretised state (trend bucket, dislocation bucket, volatility regime, current position) choosing among flat / half / full exposure. Reward is ATR-normalised P&amp;L minus a turnover penalty. Pre-trained offline on historical bars, then keeps learning online with a decaying epsilon. Its picker is a LinUCB contextual bandit -- same &quot;learn from reward&quot; philosophy, applied to universe selection.</p>
+  <dl class="dossier-stats">
+    <div><dt>Equity</dt><dd class="num">$5,208.16</dd></div>
+    <div><dt>P&amp;L</dt><dd class="num up">
+      +208.16</dd></div>
+    <div><dt>Fills</dt><dd class="num">93</dd></div>
+    <div><dt>Traded</dt><dd class="num">$56,131.09</dd></div>
+    <div><dt>Max DD</dt><dd class="num">-5.00%</dd></div>
+    <div><dt>Season pts</dt><dd class="num">26</dd></div>
+  </dl>
+  <div class="dossier-holdings">
+    <span>Holding</span> flat
+  </div>
+  <div class="dossier-holdings">
+    <span>Universe</span> &mdash;
+  </div>
+</article><article class="dossier">
+  <header>
+    <span class="swatch" style="background:var(--team-trend-rider)"></span>
+    <h3>Trend Rider</h3><span class="dossier-rank">#2</span>
+    <span class="dossier-ret up">+2.92%</span>
+  </header>
+  <p class="tagline">&ldquo;The trend is your friend until the ATR says otherwise.&rdquo;</p>
+  <p class="philosophy">Cross-sectional + time-series momentum. Buys what is already working, ranks candidates by risk-adjusted trend quality, and rides with a volatility-scaled trailing stop. Adds on strength, never on weakness.</p>
+  <dl class="dossier-stats">
+    <div><dt>Equity</dt><dd class="num">$5,145.92</dd></div>
+    <div><dt>P&amp;L</dt><dd class="num up">
+      +145.92</dd></div>
+    <div><dt>Fills</dt><dd class="num">180</dd></div>
+    <div><dt>Traded</dt><dd class="num">$146,516.54</dd></div>
+    <div><dt>Max DD</dt><dd class="num">-2.69%</dd></div>
+    <div><dt>Season pts</dt><dd class="num">14</dd></div>
+  </dl>
+  <div class="dossier-holdings">
+    <span>Holding</span> flat
+  </div>
+  <div class="dossier-holdings">
+    <span>Universe</span> &mdash;
+  </div>
+</article><article class="dossier">
+  <header>
+    <span class="swatch" style="background:var(--team-vol-breakout)"></span>
+    <h3>Vol Breakout</h3><span class="dossier-rank">#3</span>
+    <span class="dossier-ret up">+0.25%</span>
+  </header>
+  <p class="tagline">&ldquo;Quiet, quiet, quiet -- then you have to already be in.&rdquo;</p>
+  <p class="philosophy">Volatility-regime trading. Waits for a squeeze (Bollinger bandwidth in its own low percentile), then buys the Donchian channel break confirmed by range and volume expansion. Exits on a Chandelier trail. Its picker hunts coiled springs, not current winners.</p>
+  <dl class="dossier-stats">
+    <div><dt>Equity</dt><dd class="num">$5,012.31</dd></div>
+    <div><dt>P&amp;L</dt><dd class="num up">
+      +12.31</dd></div>
+    <div><dt>Fills</dt><dd class="num">47</dd></div>
+    <div><dt>Traded</dt><dd class="num">$41,425.97</dd></div>
+    <div><dt>Max DD</dt><dd class="num">-1.99%</dd></div>
+    <div><dt>Season pts</dt><dd class="num">13</dd></div>
+  </dl>
+  <div class="dossier-holdings">
+    <span>Holding</span> flat
+  </div>
+  <div class="dossier-holdings">
+    <span>Universe</span> &mdash;
+  </div>
+</article><article class="dossier">
+  <header>
+    <span class="swatch" style="background:var(--team-stat-arb)"></span>
+    <h3>Stat Arb</h3><span class="dossier-rank">#4</span>
+    <span class="dossier-ret down">-0.44%</span>
+  </header>
+  <p class="tagline">&ldquo;I don&#x27;t care where the market goes. I care where the spread goes.&rdquo;</p>
+  <p class="philosophy">Relative value. Finds pairs with a stationary spread (correlation, OLS hedge ratio, ADF t-stat, half-life), then trades the spread&#x27;s z-score. Because the competition is long-only, it expresses the pair as a *rotation*: hold the cheap leg, switch when the spread flips, flat when the spread is fair. Market-neutral in spirit, cash-account in practice.</p>
+  <dl class="dossier-stats">
+    <div><dt>Equity</dt><dd class="num">$4,977.89</dd></div>
+    <div><dt>P&amp;L</dt><dd class="num down">
+      -22.11</dd></div>
+    <div><dt>Fills</dt><dd class="num">3</dd></div>
+    <div><dt>Traded</dt><dd class="num">$4,199.36</dd></div>
+    <div><dt>Max DD</dt><dd class="num">-0.79%</dd></div>
+    <div><dt>Season pts</dt><dd class="num">8</dd></div>
+  </dl>
+  <div class="dossier-holdings">
+    <span>Holding</span> flat
+  </div>
+  <div class="dossier-holdings">
+    <span>Universe</span> &mdash;
+  </div>
+</article><article class="dossier">
+  <header>
+    <span class="swatch" style="background:var(--team-mean-reverter)"></span>
+    <h3>Mean Reverter</h3><span class="dossier-rank">#5</span>
+    <span class="dossier-ret down">-0.75%</span>
+  </header>
+  <p class="tagline">&ldquo;Everything snaps back. Size the rubber band, not the drama.&rdquo;</p>
+  <p class="philosophy">Buys statistical dislocation: price two-plus sigma below its own short mean with a stretched RSI, sized inverse to volatility, scaled in over two tranches, out at the mean. Refuses names whose measured OU half-life says they don&#x27;t revert.</p>
+  <dl class="dossier-stats">
+    <div><dt>Equity</dt><dd class="num">$4,962.31</dd></div>
+    <div><dt>P&amp;L</dt><dd class="num down">
+      -37.69</dd></div>
+    <div><dt>Fills</dt><dd class="num">33</dd></div>
+    <div><dt>Traded</dt><dd class="num">$35,650.27</dd></div>
+    <div><dt>Max DD</dt><dd class="num">-3.08%</dd></div>
+    <div><dt>Season pts</dt><dd class="num">9</dd></div>
+  </dl>
+  <div class="dossier-holdings">
+    <span>Holding</span> flat
+  </div>
+  <div class="dossier-holdings">
+    <span>Universe</span> &mdash;
+  </div>
+</article><article class="dossier">
+  <header>
+    <span class="swatch" style="background:var(--team-scalper)"></span>
+    <h3>The Scalper</h3><span class="dossier-rank">#6</span>
+    <span class="dossier-ret down">-1.97%</span>
+  </header>
+  <p class="tagline">&ldquo;A penny a hundred times beats a dollar you waited all week for.&rdquo;</p>
+  <p class="philosophy">Microstructure. Computes a microprice fair value from top-of-book sizes plus a short-horizon order-flow drift, then works passive limit bids below fair value and passive offers above it, skewed by inventory. Hundreds of small round trips, inventory capped, flat into the close.</p>
+  <dl class="dossier-stats">
+    <div><dt>Equity</dt><dd class="num">$4,901.41</dd></div>
+    <div><dt>P&amp;L</dt><dd class="num down">
+      -98.59</dd></div>
+    <div><dt>Fills</dt><dd class="num">994</dd></div>
+    <div><dt>Traded</dt><dd class="num">$227,341.96</dd></div>
+    <div><dt>Max DD</dt><dd class="num">-17.64%</dd></div>
+    <div><dt>Season pts</dt><dd class="num">10</dd></div>
+  </dl>
+  <div class="dossier-holdings">
+    <span>Holding</span> flat
+  </div>
+  <div class="dossier-holdings">
+    <span>Universe</span> &mdash;
+  </div>
+</article><article class="dossier">
+  <header>
+    <span class="swatch" style="background:var(--team-gambler)"></span>
+    <h3>The Gambler</h3><span class="dossier-rank">#7</span>
+    <span class="dossier-ret down">-2.50%</span>
+  </header>
+  <p class="tagline">&ldquo;Kelly said bet the edge. Kelly never said how big the edge was.&rdquo;</p>
+  <p class="philosophy">Deliberately high-variance. Estimates a win probability and payoff ratio from the recent tape, sizes with a *fractional Kelly multiplied up*, and concentrates. After a loss it steps size up (bounded, 3 rungs); after a win it resets. Prefers lottery-like names: high vol, wide range, gappy. Exists to answer &quot;does variance-seeking beat discipline over 3 weeks?&quot;</p>
+  <dl class="dossier-stats">
+    <div><dt>Equity</dt><dd class="num">$4,874.78</dd></div>
+    <div><dt>P&amp;L</dt><dd class="num down">
+      -125.22</dd></div>
+    <div><dt>Fills</dt><dd class="num">187</dd></div>
+    <div><dt>Traded</dt><dd class="num">$141,178.57</dd></div>
+    <div><dt>Max DD</dt><dd class="num">-6.00%</dd></div>
+    <div><dt>Season pts</dt><dd class="num">11</dd></div>
+  </dl>
+  <div class="dossier-holdings">
+    <span>Holding</span> flat
+  </div>
+  <div class="dossier-holdings">
+    <span>Universe</span> &mdash;
+  </div>
+</article><article class="dossier">
+  <header>
+    <span class="swatch" style="background:var(--team-news-hound)"></span>
+    <h3>News Hound</h3><span class="dossier-rank">#8</span>
+    <span class="dossier-ret down">-3.38%</span>
+  </header>
+  <p class="tagline">&ldquo;The tape tells you what happened. The wire tells you why.&rdquo;</p>
+  <p class="philosophy">Event-driven. Scores the Alpaca news wire with a finance-tuned sentiment lexicon (no LLM -- a deterministic, checked-in dictionary plus negation and intensifier handling), decays by age, weights by source and by how exclusively the story is about that ticker, then requires price confirmation before buying. Exits on sentiment decay or a time stop.</p>
+  <dl class="dossier-stats">
+    <div><dt>Equity</dt><dd class="num">$4,831.06</dd></div>
+    <div><dt>P&amp;L</dt><dd class="num down">
+      -168.94</dd></div>
+    <div><dt>Fills</dt><dd class="num">343</dd></div>
+    <div><dt>Traded</dt><dd class="num">$284,517.09</dd></div>
+    <div><dt>Max DD</dt><dd class="num">-16.94%</dd></div>
+    <div><dt>Season pts</dt><dd class="num">17</dd></div>
+  </dl>
+  <div class="dossier-holdings">
+    <span>Holding</span> flat
+  </div>
+  <div class="dossier-holdings">
+    <span>Universe</span> &mdash;
+  </div>
+</article><article class="dossier">
+  <header>
+    <span class="swatch" style="background:var(--team-benchmark)"></span>
+    <h3>Buy &amp; Hold (benchmark)</h3>
+    <span class="dossier-ret up">+1.00%</span>
+  </header>
+  <p class="tagline">&ldquo;Does any of this beat just owning the thing?&rdquo;</p>
+  <p class="philosophy">Not a competitor. Buys an equal-weight basket of its universe on the first tick of the round and never trades again. Present in every report so each team&#x27;s result can be read against the market it faced.</p>
+  <dl class="dossier-stats">
+    <div><dt>Equity</dt><dd class="num">$5,049.86</dd></div>
+    <div><dt>P&amp;L</dt><dd class="num up">
+      +49.86</dd></div>
+    <div><dt>Fills</dt><dd class="num">3</dd></div>
+    <div><dt>Traded</dt><dd class="num">$4,894.62</dd></div>
+    <div><dt>Max DD</dt><dd class="num">-0.96%</dd></div>
+    <div><dt>Season pts</dt><dd class="num">0</dd></div>
+  </dl>
+  <div class="dossier-holdings">
+    <span>Holding</span> flat
+  </div>
+  <div class="dossier-holdings">
+    <span>Universe</span> &mdash;
+  </div>
+</article></div>
+</section>
+
+<section class="panel-set hidden" id="tab-season">
+  <section class="panel">
+  <h2>Season schedule</h2>
+  <table class="plan">
+    <thead><tr><th>#</th><th>Round</th><th>Window</th><th>State</th></tr></thead>
+    <tbody>
+<tr class="done"><td class="num">1</td><td>The Big Three</td><td>Mon 21 Sep - Fri 25 Sep</td><td><span class="pill done">done</span></td></tr>
+<tr class="done"><td class="num">2</td><td>Open Market</td><td>Mon 05 Oct - Fri 09 Oct</td><td><span class="pill done">done</span></td></tr>
+<tr class="upcoming"><td class="num">3</td><td>Chaos Draft</td><td>Mon 12 Oct - Fri 16 Oct</td><td><span class="pill upcoming">upcoming</span></td></tr>
+    </tbody>
+  </table>
+</section>
+  <section class="panel"><h2>Season standings</h2><table class="data"><thead><tr><th class="num">#</th><th>Team</th><th class="num">Points</th><th class="num">R1</th><th class="num">R2</th><th class="num">Compounded</th><th class="num">Wins</th></tr></thead><tbody><tr><td class="num">1</td><td><span class="swatch" style="background:var(--team-q-learner)"></span>Q-Learner</td><td class="num strong">26</td><td class="num up">+1.40%</td><td class="num up">+4.16%</td><td class="num up">+5.62%</td><td class="num">1</td></tr><tr><td class="num">2</td><td><span class="swatch" style="background:var(--team-news-hound)"></span>News Hound</td><td class="num strong">17</td><td class="num up">+1.44%</td><td class="num down">-3.06%</td><td class="num down">-1.66%</td><td class="num">1</td></tr><tr><td class="num">3</td><td><span class="swatch" style="background:var(--team-trend-rider)"></span>Trend Rider</td><td class="num strong">14</td><td class="num down">-0.14%</td><td class="num up">+2.92%</td><td class="num up">+2.78%</td><td class="num">0</td></tr><tr><td class="num">4</td><td><span class="swatch" style="background:var(--team-vol-breakout)"></span>Vol Breakout</td><td class="num strong">13</td><td class="num up">+0.52%</td><td class="num up">+0.24%</td><td class="num up">+0.76%</td><td class="num">0</td></tr><tr><td class="num">5</td><td><span class="swatch" style="background:var(--team-gambler)"></span>The Gambler</td><td class="num strong">11</td><td class="num up">+1.13%</td><td class="num down">-2.50%</td><td class="num down">-1.40%</td><td class="num">0</td></tr><tr><td class="num">6</td><td><span class="swatch" style="background:var(--team-scalper)"></span>The Scalper</td><td class="num strong">10</td><td class="num up">+0.69%</td><td class="num down">-1.97%</td><td class="num down">-1.29%</td><td class="num">0</td></tr><tr><td class="num">7</td><td><span class="swatch" style="background:var(--team-mean-reverter)"></span>Mean Reverter</td><td class="num strong">9</td><td class="num up">+0.21%</td><td class="num down">-0.75%</td><td class="num down">-0.54%</td><td class="num">0</td></tr><tr><td class="num">8</td><td><span class="swatch" style="background:var(--team-stat-arb)"></span>Stat Arb</td><td class="num strong">8</td><td class="num down">-0.65%</td><td class="num down">-0.59%</td><td class="num down">-1.24%</td><td class="num">0</td></tr><tr class="unscored"><td class="num">&mdash;</td><td><span class="swatch" style="background:var(--team-benchmark)"></span>Buy &amp; Hold (benchmark)</td><td class="num strong">0</td><td class="num up">+0.86%</td><td class="num up">+1.00%</td><td class="num up">+1.86%</td><td class="num">0</td></tr></tbody></table></section>
+</section>
+
+<section class="panel-set hidden" id="tab-activity">
+  <section class="panel"><h2>Trade tape</h2><table class="data tape"><thead><tr><th>Time</th><th>Team</th><th>Side</th><th class="num">Qty</th><th>Symbol</th><th class="num">Price</th><th>Why</th></tr></thead><tbody><tr><td class="dim num">19:46:54</td><td><span class="swatch sm" style="background:var(--team-trend-rider)"></span>Trend Rider</td><td class="side-sell">SELL</td><td class="num">3.645</td><td>MRNA</td><td class="num">222.07</td><td class="dim reason">trail stop 219.60</td></tr><tr><td class="dim num">19:46:53</td><td><span class="swatch sm" style="background:var(--team-trend-rider)"></span>Trend Rider</td><td class="side-sell">SELL</td><td class="num">6.365</td><td>CRWD</td><td class="num">274.42</td><td class="dim reason">trail stop 273.17</td></tr><tr><td class="dim num">19:46:29</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">1.483</td><td>SPCX</td><td class="num">161.21</td><td class="dim reason">flatten into the close</td></tr><tr><td class="dim num">19:45:48</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">1.482</td><td>SPCX</td><td class="num">161.39</td><td class="dim reason">flatten into the close [trimmed to flat]</td></tr><tr><td class="dim num">19:45:48</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">6.397</td><td>NVDA</td><td class="num">229.64</td><td class="dim reason">flatten into the close</td></tr><tr><td class="dim num">19:45:48</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">1.476</td><td>AAPL</td><td class="num">336.29</td><td class="dim reason">flatten into the close</td></tr><tr><td class="dim num">19:45:32</td><td><span class="swatch sm" style="background:var(--team-gambler)"></span>The Gambler</td><td class="side-sell">SELL</td><td class="num">7.211</td><td>MRNA</td><td class="num">222.16</td><td class="dim reason">stopped (-2.2 ATR)</td></tr><tr><td class="dim num">19:43:31</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">6.829</td><td>INTC</td><td class="num">104.45</td><td class="dim reason">inventory stop (-86bps)</td></tr><tr><td class="dim num">19:41:32</td><td><span class="swatch sm" style="background:var(--team-trend-rider)"></span>Trend Rider</td><td class="side-buy">BUY</td><td class="num">3.645</td><td>MRNA</td><td class="num">221.58</td><td class="dim reason">momentum entry (score 0.35, adx 36)</td></tr><tr><td class="dim num">19:41:31</td><td><span class="swatch sm" style="background:var(--team-trend-rider)"></span>Trend Rider</td><td class="side-buy">BUY</td><td class="num">2.986</td><td>CRWD</td><td class="num">274.00</td><td class="dim reason">pyramid #1 (9.1 ATR onside)</td></tr><tr><td class="dim num">19:41:31</td><td><span class="swatch sm" style="background:var(--team-trend-rider)"></span>Trend Rider</td><td class="side-sell">SELL</td><td class="num">2.19</td><td>QQQ</td><td class="num">750.92</td><td class="dim reason">trail stop 750.93</td></tr><tr><td class="dim num">19:36:44</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-buy">BUY</td><td class="num">1.481</td><td>SPCX</td><td class="num">161.59</td><td class="dim reason">bid 162.04 vs fair 162.15 (spread 30.3bps, imb +0.71, drift +0.065%)</td></tr><tr><td class="dim num">19:36:28</td><td><span class="swatch sm" style="background:var(--team-trend-rider)"></span>Trend Rider</td><td class="side-buy">BUY</td><td class="num">3.378</td><td>CRWD</td><td class="num">274.11</td><td class="dim reason">momentum entry (score 0.93, adx 56)</td></tr><tr><td class="dim num">19:36:28</td><td><span class="swatch sm" style="background:var(--team-trend-rider)"></span>Trend Rider</td><td class="side-sell">SELL</td><td class="num">9.584</td><td>SHOP</td><td class="num">170.52</td><td class="dim reason">trail stop 169.93</td></tr><tr><td class="dim num">19:35:43</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-buy">BUY</td><td class="num">1.484</td><td>SPCX</td><td class="num">161.72</td><td class="dim reason">bid 161.72 vs fair 161.82 (spread 6.2bps, imb +0.71, drift -0.040%)</td></tr><tr><td class="dim num">19:34:45</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">0.2182</td><td>SPCX</td><td class="num">161.71</td><td class="dim reason">offer 161.71 vs fair 161.62 (skew 0.1bps, inv 1%)</td></tr><tr><td class="dim num">19:34:09</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">1.484</td><td>SPCX</td><td class="num">161.68</td><td class="dim reason">offer 161.68 vs fair 161.55 (skew 0.7bps, inv 6%)</td></tr><tr><td class="dim num">19:33:37</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-buy">BUY</td><td class="num">0.7124</td><td>AAPL</td><td class="num">336.87</td><td class="dim reason">bid 336.87 vs fair 337.10 (spread 5.9bps, imb -0.33, drift +0.056%)</td></tr><tr><td class="dim num">19:32:50</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-buy">BUY</td><td class="num">2.284</td><td>INTC</td><td class="num">105.10</td><td class="dim reason">bid 105.10 vs fair 105.18 (spread 3.8bps, imb +0.00, drift -0.029%)</td></tr><tr><td class="dim num">19:32:43</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">1.484</td><td>SPCX</td><td class="num">161.68</td><td class="dim reason">offer 161.68 vs fair 161.19 (skew 1.4bps, inv 10%)</td></tr><tr><td class="dim num">19:31:41</td><td><span class="swatch sm" style="background:var(--team-trend-rider)"></span>Trend Rider</td><td class="side-buy">BUY</td><td class="num">4.55</td><td>PLTR</td><td class="num">207.88</td><td class="dim reason">momentum entry (score 1.11, adx 65)</td></tr><tr><td class="dim num">19:31:41</td><td><span class="swatch sm" style="background:var(--team-trend-rider)"></span>Trend Rider</td><td class="side-sell">SELL</td><td class="num">1.729</td><td>MSFT</td><td class="num">535.34</td><td class="dim reason">trail stop 535.45</td></tr><tr><td class="dim num">19:31:18</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">1.484</td><td>SPCX</td><td class="num">161.68</td><td class="dim reason">offer 161.68 vs fair 161.14 (skew 2.0bps, inv 15%)</td></tr><tr><td class="dim num">19:30:04</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-buy">BUY</td><td class="num">1.484</td><td>SPCX</td><td class="num">161.73</td><td class="dim reason">bid 161.73 vs fair 161.85 (spread 17.9bps, imb -0.60, drift +0.297%)</td></tr><tr><td class="dim num">19:29:06</td><td><span class="swatch sm" style="background:var(--team-gambler)"></span>The Gambler</td><td class="side-buy">BUY</td><td class="num">7.211</td><td>MRNA</td><td class="num">220.69</td><td class="dim reason">kelly bet w=0.34 (p=0.60 b=0.85 f*=0.130 rung 2 x1.90)</td></tr><tr><td class="dim num">19:29:04</td><td><span class="swatch sm" style="background:var(--team-gambler)"></span>The Gambler</td><td class="side-sell">SELL</td><td class="num">6.279</td><td>MRVL</td><td class="num">274.51</td><td class="dim reason">stopped (-10.2 ATR)</td></tr><tr><td class="dim num">19:28:18</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">1.483</td><td>SPCX</td><td class="num">161.97</td><td class="dim reason">offer 161.88 vs fair 161.82 (skew 2.0bps, inv 15%)</td></tr><tr><td class="dim num">19:27:42</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-buy">BUY</td><td class="num">1.481</td><td>SPCX</td><td class="num">161.98</td><td class="dim reason">bid 162.02 vs fair 162.25 (spread 4.3bps, imb -0.60, drift +0.418%)</td></tr><tr><td class="dim num">19:27:05</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">1.482</td><td>SPCX</td><td class="num">162.03</td><td class="dim reason">offer 161.92 vs fair 161.86 (skew 2.0bps, inv 15%)</td></tr><tr><td class="dim num">19:26:00</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">1.483</td><td>SPCX</td><td class="num">161.89</td><td class="dim reason">offer 161.89 vs fair 161.83 (skew 2.6bps, inv 20%)</td></tr><tr><td class="dim num">19:25:50</td><td><span class="swatch sm" style="background:var(--team-gambler)"></span>The Gambler</td><td class="side-sell">SELL</td><td class="num">5.847</td><td>MRNA</td><td class="num">221.21</td><td class="dim reason">stopped (-3.2 ATR)</td></tr><tr><td class="dim num">19:25:50</td><td><span class="swatch sm" style="background:var(--team-gambler)"></span>The Gambler</td><td class="side-buy">BUY</td><td class="num">6.279</td><td>MRVL</td><td class="num">275.00</td><td class="dim reason">kelly bet w=0.36 (p=0.60 b=0.96 f*=0.182 rung 1 x1.45)</td></tr><tr><td class="dim num">19:25:16</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">1.483</td><td>SPCX</td><td class="num">161.84</td><td class="dim reason">offer 161.79 vs fair 161.74 (skew 3.3bps, inv 25%)</td></tr><tr><td class="dim num">19:24:35</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-buy">BUY</td><td class="num">0.7108</td><td>AAPL</td><td class="num">337.65</td><td class="dim reason">bid 337.65 vs fair 337.86 (spread 8.6bps, imb -0.33, drift -0.075%)</td></tr><tr><td class="dim num">19:24:07</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">1.485</td><td>SPCX</td><td class="num">161.57</td><td class="dim reason">offer 161.57 vs fair 161.54 (skew 3.9bps, inv 30%)</td></tr><tr><td class="dim num">19:22:34</td><td><span class="swatch sm" style="background:var(--team-gambler)"></span>The Gambler</td><td class="side-sell">SELL</td><td class="num">5.967</td><td>COHR</td><td class="num">312.83</td><td class="dim reason">target hit (+7.1 ATR)</td></tr><tr><td class="dim num">19:22:34</td><td><span class="swatch sm" style="background:var(--team-gambler)"></span>The Gambler</td><td class="side-buy">BUY</td><td class="num">5.847</td><td>MRNA</td><td class="num">221.90</td><td class="dim reason">kelly bet w=0.26 (p=0.62 b=0.91 f*=0.195 rung 0 x1.00)</td></tr><tr><td class="dim num">19:21:18</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-buy">BUY</td><td class="num">1.468</td><td>SPCX</td><td class="num">161.39</td><td class="dim reason">bid 161.41 vs fair 161.56 (spread 3.7bps, imb +0.00, drift +0.242%)</td></tr><tr><td class="dim num">19:21:03</td><td><span class="swatch sm" style="background:var(--team-vol-breakout)"></span>Vol Breakout</td><td class="side-sell">SELL</td><td class="num">4.583</td><td>AAPL</td><td class="num">338.10</td><td class="dim reason">failed break (back under 338.36 after 1b)</td></tr><tr><td class="dim num">19:21:01</td><td><span class="swatch sm" style="background:var(--team-scalper)"></span>The Scalper</td><td class="side-sell">SELL</td><td class="num">0.7099</td><td>AAPL</td><td class="num">338.12</td><td class="dim reason">offer 338.06 vs fair 337.88 (skew 0.7bps, inv 5%)</td></tr></tbody></table></section>
+</section>
+
+<footer>
+  <span>data: live Alpaca paper accounts</span>
+  <span>rules: 4b4f467acbf28c1e</span>
+  <span>bankroll: $5,000.00 per team per round</span>
+  <span>updated 18:50:03 UTC</span>
+  <span>auto-refresh: 30s</span>
+</footer>
+<script>
+(function () {
+  // Tabs. Plain buttons toggling panels: no router, no history entries, and
+  // the whole page still works if this script never runs (all panels would
+  // simply be visible).
+  var tabs = document.querySelectorAll('.tab');
+  function show(id) {
+    document.querySelectorAll('.panel-set').forEach(function (p) {
+      p.classList.toggle('hidden', p.id !== 'tab-' + id);
+    });
+    tabs.forEach(function (t) {
+      t.classList.toggle('on', t.getAttribute('data-tab') === id);
+    });
+    try { localStorage.setItem('comp-tab', id); } catch (e) { /* private mode */ }
+  }
+  tabs.forEach(function (t) {
+    t.addEventListener('click', function () { show(t.getAttribute('data-tab')); });
+  });
+  // Survive the 30-second auto-refresh on whichever tab the visitor chose.
+  try {
+    var saved = localStorage.getItem('comp-tab');
+    if (saved && document.getElementById('tab-' + saved)) show(saved);
+  } catch (e) { /* ignore */ }
+})();
+
+(function () {
+  // Grow the race bars from zero on load, so a refresh feels like movement
+  // rather than a redraw.
+  window.requestAnimationFrame(function () {
+    document.querySelectorAll('.race-bar').forEach(function (b) {
+      var w = b.style.width;
+      b.style.width = '0%';
+      window.requestAnimationFrame(function () { b.style.width = w; });
+    });
+  });
+})();
+
+(function () {
+  // The season countdown. Ticks locally so it stays smooth between the
+  // page's periodic regenerations.
+  var el = document.querySelector('[data-deadline]');
+  if (!el) return;
+  var target = new Date(el.getAttribute('data-deadline')).getTime();
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function tick() {
+    var left = Math.max(0, Math.floor((target - Date.now()) / 1000));
+    var d = Math.floor(left / 86400);
+    var h = Math.floor((left % 86400) / 3600);
+    var m = Math.floor((left % 3600) / 60);
+    var s = left % 60;
+    el.textContent = d > 0
+      ? d + 'd ' + pad(h) + ':' + pad(m) + ':' + pad(s)
+      : pad(h) + ':' + pad(m) + ':' + pad(s);
+    if (left === 0) { el.textContent = '00:00:00'; return; }
+    setTimeout(tick, 1000);
+  }
+  tick();
+})();
+
+(function () {
+  var node = document.getElementById('chart-data');
+  if (!node) return;
+  var data = JSON.parse(node.textContent);
+  var svg = document.querySelector('.chart');
+  var target = document.getElementById('hover-target');
+  var cross = document.getElementById('crosshair');
+  var tip = document.getElementById('tooltip');
+  if (!svg || !target || !tip) return;
+
+  var plotW = data.w - data.padL - data.padR;
+
+  function xOf(i) { return data.padL + (i / Math.max(data.n - 1, 1)) * plotW; }
+
+  function show(evt) {
+    var box = svg.getBoundingClientRect();
+    var scale = data.w / box.width;
+    var svgX = (evt.clientX - box.left) * scale;
+    var frac = (svgX - data.padL) / plotW;
+    var i = Math.round(frac * Math.max(data.n - 1, 1));
+    if (i < 0) i = 0;
+    if (i > data.n - 1) i = data.n - 1;
+
+    cross.setAttribute('x1', xOf(i));
+    cross.setAttribute('x2', xOf(i));
+    cross.style.display = '';
+
+    var rows = data.series.map(function (s) {
+      var v = s.curve[Math.min(i, s.curve.length - 1)];
+      var ret = s.baseline ? (v / s.baseline - 1) * 100 : 0;
+      return { name: s.name, key: s.key, v: v, ret: ret, scored: s.scored };
+    }).sort(function (a, b) { return b.ret - a.ret; });
+
+    var stamp = data.stamps[Math.min(i, data.stamps.length - 1)] || '';
+    var html = '<div class="tip-head">' + stamp.replace('T', ' ').slice(0, 16) +
+               ' UTC</div>';
+    rows.forEach(function (r) {
+      var cls = r.ret > 0 ? 'up' : (r.ret < 0 ? 'down' : 'flat');
+      html += '<div class="tip-row"><span class="swatch sm" style="background:' +
+              'var(--team-' + r.key.replace(/_/g, '-') + ')"></span>' +
+              '<span class="tip-name">' + r.name + (r.scored ? '' : ' *') +
+              '</span><span class="tip-val">$' +
+              r.v.toLocaleString(undefined, { minimumFractionDigits: 2,
+                                              maximumFractionDigits: 2 }) +
+              '</span><span class="tip-ret ' + cls + '">' +
+              (r.ret >= 0 ? '+' : '') + r.ret.toFixed(2) + '%</span></div>';
+    });
+    tip.innerHTML = html;
+    tip.hidden = false;
+
+    var wrapBox = svg.parentElement.getBoundingClientRect();
+    var px = evt.clientX - wrapBox.left + 16;
+    if (px + tip.offsetWidth > wrapBox.width) {
+      px = evt.clientX - wrapBox.left - tip.offsetWidth - 16;
+    }
+    tip.style.left = Math.max(px, 4) + 'px';
+    tip.style.top = '12px';
+  }
+
+  function hide() { cross.style.display = 'none'; tip.hidden = true; }
+
+  target.addEventListener('mousemove', show);
+  target.addEventListener('mouseleave', hide);
+  target.addEventListener('touchmove', function (e) {
+    if (e.touches.length) { show(e.touches[0]); e.preventDefault(); }
+  }, { passive: false });
+})();
+</script>
+</body>
+</html>
